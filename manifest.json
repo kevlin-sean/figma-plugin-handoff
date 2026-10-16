@@ -1,0 +1,10 @@
+{
+  "name": "Figma 离线交付 · Offline Handoff",
+  "id": "figma-offline-handoff-local",
+  "api": "1.0.0",
+  "editorType": ["figma"],
+  "main": "code.js",
+  "ui": "ui.html",
+  "documentAccess": "dynamic-page",
+  "networkAccess": {"allowedDomains": ["none"]}
+}
