@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const P=require('../src/preview-optimize.js'),O=require('../src/optimize-package.js'),JSZip=require('../vendor/jszip.min.js');
+const P=require('../dist/core/preview-optimize.cjs'),O=require('../dist/core/optimize-package.cjs'),JSZip=require('jszip');
 function chunk(tag,data=Buffer.alloc(0)){const b=Buffer.alloc(data.length+12);b.writeUInt32BE(data.length);b.write(tag,4);data.copy(b,8);return b;}
 function png(extra=[],width=2880,height=1800,depth=8){const h=Buffer.alloc(13);h.writeUInt32BE(width);h.writeUInt32BE(height,4);h[8]=depth;h[9]=6;return Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),chunk('IHDR',h),...extra,chunk('IEND')]);}
 test('preview eligibility protects profiles, animation, precision and bounded working memory',()=>{

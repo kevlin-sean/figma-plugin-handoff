@@ -1,6 +1,6 @@
 /* Both halves run together. Figma-to-UI messages deliberately have source:null. */
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-const C=require('../src/package-core.js'),JSZip=require('../vendor/jszip.min.js');
+const C=require('../dist/core/package.cjs'),JSZip=require('jszip');
 const root=path.resolve(__dirname,'..');
 class Element{constructor(){this.children=[];this.value='';this.checked=false;this.disabled=false;this.hidden=false;this.textContent='';this.classList={toggle(){}};}append(...els){this.children.push(...els);}replaceChildren(){this.children=[];}removeAttribute(name){delete this[name];}}
 function page(id){return{id,name:id,type:'PAGE',children:[],selection:[],loadAsync:async()=>{}};}
@@ -9,14 +9,14 @@ function harness({initialSelection=false,disconnect=false,nativeSource=null,uiSo
  const p1=page('p1'),p2=page('p2'),a=frame('a',p1),b=frame('b',p1,'SECTION'),c=frame('c',p2),events={},sent=[],outgoing=[],tasks=[];let channel,ui,blob;
  if(initialSelection)p1.selection=[a];
  const native={figma:{base64Encode:a=>Buffer.from(a).toString('base64'),root:{name:'Fixture',children:[p1,p2]},currentPage:p1,fileKey:'fixture',on(name,fn){events[name]=fn},showUI(html){channel=html},ui:{postMessage(message){outgoing.push(message);if(ui&&!disconnect)tasks.push(ui.window.onmessage({source:null,data:{pluginMessage:message}}));}}},__html__:'__HANDOFF_CHANNEL__',console,Uint8Array,DataView};
- vm.createContext(native);vm.runInContext(nativeSource||fs.readFileSync(path.join(root,'code.js'),'utf8'),native);
+ vm.createContext(native);vm.runInContext(nativeSource||fs.readFileSync(path.join(root,'dist/code.js'),'utf8'),native);
  const els=new Map(),$=id=>{if(!els.has(id))els.set(id,new Element());return els.get(id)},choice={mode:{value:'new'},scope:{value:'selection'}};
  $('previewScale').value='1';
  const pageInputs=()=>$('pages').children.map(label=>label.children[0]);
  const document={getElementById:$,querySelector(s){return s.includes('name=mode')?choice.mode:choice.scope;},querySelectorAll(s){if(s==='#pages input:checked')return pageInputs().filter(e=>e.checked);if(s==='input,select')return [...els.values(),...pageInputs()];return[];},createElement(){return new Element()},createTextNode(text){return{textContent:text}}};
  const timers=new Map();let nextTimer=0;
- ui={document,parent:{postMessage({pluginMessage}){sent.push(pluginMessage);tasks.push(native.figma.ui.onmessage(pluginMessage));}},window:{addEventListener(){}},HandoffCore:C,HandoffOptimizer:require('../src/optimize-package.js'),JSZip,VIEWER:Object.fromEntries(fs.readdirSync(path.join(root,'viewer')).map(n=>[n,fs.readFileSync(path.join(root,'viewer',n),'utf8')])),console,Uint8Array,Blob,URL:{createObjectURL(value){blob=value;return'blob:result'},revokeObjectURL(){}},setTimeout(fn){timers.set(++nextTimer,fn);return nextTimer},clearTimeout(id){timers.delete(id)}};
- vm.createContext(ui);vm.runInContext((uiSource||fs.readFileSync(path.join(root,'src/ui.js'),'utf8')).replaceAll('__HANDOFF_CHANNEL__',channel),ui);
+ ui={document,parent:{postMessage({pluginMessage}){sent.push(pluginMessage);tasks.push(native.figma.ui.onmessage(pluginMessage));}},window:{addEventListener(){}},HandoffCore:C,HandoffOptimizer:require('../dist/core/optimize-package.cjs'),JSZip,VIEWER:Object.fromEntries(fs.readdirSync(path.join(root,'dist/viewer')).map(n=>[n,fs.readFileSync(path.join(root,'dist/viewer',n),'utf8')])),console,Uint8Array,Blob,URL:{createObjectURL(value){blob=value;return'blob:result'},revokeObjectURL(){}},setTimeout(fn){timers.set(++nextTimer,fn);return nextTimer},clearTimeout(id){timers.delete(id)}};
+ vm.createContext(ui);vm.runInContext((uiSource||fs.readFileSync(path.join(root,'dist/ui.js'),'utf8')).replaceAll('__HANDOFF_CHANNEL__',channel),ui);
  async function drain(){while(tasks.length){const pending=tasks.splice(0);await Promise.all(pending);}}
  return{native,ui,$,p1,p2,a,b,c,sent,outgoing,choice,events,pageInputs,timers,channel,drain,blob:()=>blob};
 }

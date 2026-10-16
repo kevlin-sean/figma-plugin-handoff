@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-const C=require('../src/package-core.js');
-const source=fs.readFileSync(path.join(__dirname,'../code.js'),'utf8');
+const C=require('../dist/core/package.cjs');
+const source=fs.readFileSync(path.join(__dirname,'../dist/code.js'),'utf8');
 function png(w,h){const a=new Uint8Array(24),v=new DataView(a.buffer);v.setUint32(0,0x89504e47);v.setUint32(16,Math.round(w));v.setUint32(20,Math.round(h));return a;}
 function add(parent,id,type,x,y,width,height){const b={x,y,width,height},n={id,name:id,type,parent,children:[],visible:true,x:x-(parent.absoluteBoundingBox?.x||0),y:y-(parent.absoluteBoundingBox?.y||0),width,height,absoluteBoundingBox:b,absoluteRenderBounds:{...b},absoluteTransform:[[1,0,x],[0,1,y]],fills:[],strokes:[],exportSettings:[]};parent.children.push(n);n.calls=[];n.exportAsync=async opts=>{n.calls.push(opts);const r=opts.useAbsoluteBounds?n.absoluteBoundingBox:n.absoluteRenderBounds;return png(r.width*opts.constraint.value,r.height*opts.constraint.value)};return n;}
 function setup(){

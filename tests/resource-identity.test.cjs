@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),cp=require('node:child_process');
-const {canonicalSvg}=require('../src/resource-identity.js'),O=require('../src/optimize-package.js'),JSZip=require('../vendor/jszip.min.js');
+const {canonicalSvg}=require('../dist/core/resource-identity.cjs'),O=require('../dist/core/optimize-package.cjs'),JSZip=require('jszip');
 function svg(id='source',color='#f00') {return `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><defs><linearGradient id="paint_${id}" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${color}"/><stop offset="1" stop-color="#00f"/></linearGradient><clipPath id="clip_${id}"><rect width="18" height="18" rx="4"/></clipPath></defs><g clip-path="url(#clip_${id})"><path id="shape_${id}" fill="url(#paint_${id})" d="M0 0H20V20H0Z"/></g></svg>`;}
 function record(id,source,name='icon'){return {id,name,path:'assets/'+id+'.svg',format:'svg',width:20,height:20,scale:1,scaleLabel:'矢量',bytes:Buffer.byteLength(source),exportSettings:{format:'SVG'},nodeIds:[id],frameId:'frame-'+id,regionId:'region',uses:[{nodeId:id,name,frameId:'frame-'+id,regionId:'region',width:20,height:20}]};}
 const simple=svg(),renamed=svg('another_frame_398_20865');

@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');
-const O=require('../src/optimize-package.js'),JSZip=require('../vendor/jszip.min.js');
+const O=require('../dist/core/optimize-package.cjs'),JSZip=require('jszip');
 function asset(id,name='icon',more={}){return {id,name,path:'assets/'+id+'.png',format:'png',width:20,height:20,pixelWidth:40,pixelHeight:40,scale:2,scaleLabel:'2×',exportSettings:{format:'PNG',constraint:{type:'SCALE',value:2}},nodeIds:[id],frameId:'frame-'+id,regionId:'region',uses:[{nodeId:id,name,frameId:'frame-'+id,regionId:'region',width:20,height:20}],...more};}
 function model(assets){return {assets,previews:[{id:'region',path:'previews/current.png'}]};}
 function zipFor(data,bytes){const z=new JSZip();z.file('test/previews/current.png','preview');for(const a of data.assets)z.file('test/'+a.path,bytes||'same-asset');return z;}

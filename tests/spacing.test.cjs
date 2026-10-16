@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const S=require('../viewer/spacing.js');
+const S=require('../dist/viewer/spacing.cjs');
 function node(id,x,y,width,height,parentId=null,extra={}){return{id,name:id,width,height,parentId,regionId:parentId||id,visible:true,absoluteTransform:[[1,0,x],[0,1,y]],absoluteBoundingBox:{x,y,width,height},...extra};}
 test('real padding and auto-distributed gap retain their meaning; measurements do not create margin',()=>{
  const n=node('p',0,0,200,100,null,{layoutMode:'HORIZONTAL',paddingTop:8,paddingRight:16,paddingBottom:12,paddingLeft:24,itemSpacing:9,primaryAxisAlignItems:'SPACE_BETWEEN'}),m=S.create([n]).measure('p');assert.deepEqual(m.inner.values,{top:8,right:16,bottom:12,left:24});assert.equal(m.inner.source,'padding');assert.equal(m.inner.gap,'AUTO');assert.equal(m.parent,null);assert.equal(m.lines.length,4);assert.ok(!('margin' in m));

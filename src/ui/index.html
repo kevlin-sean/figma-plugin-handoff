@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <style>/* CSS */</style>
+  </head>
+  <body>
+    <div class="tag">OFFLINE HANDOFF · 1.6.0</div>
+    <h1>Figma 离线交付</h1>
+    <section>
+      <strong>交付方式</strong
+      ><label><input type="radio" name="mode" value="new" checked />首次导出</label
+      ><label><input type="radio" name="mode" value="update" />局部更新已有交付包</label>
+      <div id="oldPanel" hidden>
+        <input id="oldFile" type="file" accept=".zip" />
+        <div id="oldInfo">选择上次交付的 ZIP。</div>
+        <label><input id="sameFile" type="checkbox" />已确认旧交付包属于当前 Figma 文件</label
+        ><label><input id="upgradeViewer" type="checkbox" />升级交付查看器</label>
+        <p class="hint">替换所选 Frame / Section，保留其他区域。</p>
+      </div>
+    </section>
+    <section>
+      <strong>导出范围</strong>
+      <div id="scopeControls">
+        <label><input type="radio" name="scope" value="pages" checked />选择 Pages</label>
+        <div id="pages">正在读取页面…</div>
+        <label
+          ><input type="radio" name="scope" value="selection" />Figma 当前选中的 Frame /
+          Section</label
+        >
+      </div>
+      <div class="row" id="selectionRow">
+        <div id="selection">正在读取选区…</div>
+        <button id="refreshSelection" class="secondary" type="button">刷新选区</button>
+      </div>
+      <div id="connection" class="hint">正在连接 Figma…</div>
+      <div id="scopeInfo"></div>
+    </section>
+    <section>
+      <label
+        >设计预览
+        <select id="previewScale">
+          <option value="1">1×</option>
+          <option value="2" selected>2×</option>
+          <option value="3">3×</option>
+        </select></label
+      >
+      <p class="hint">切图沿用图层的 SVG / PNG Export；同格式多条时取第一条。</p>
+    </section>
+    <section>
+      <label for="packageName"><strong>交付包名称</strong></label
+      ><input
+        id="packageName"
+        type="text"
+        placeholder="留空使用默认名称"
+        aria-describedby="packageNamePreview packageNameHint"
+        autocomplete="off"
+      />
+      <p id="packageNamePreview" class="hint"></p>
+      <p id="packageNameHint" class="hint">压缩包与解压文件夹同名，请在生成前命名。</p>
+    </section>
+    <div class="row">
+      <button id="export">生成离线交付 ZIP</button
+      ><button id="cancel" class="secondary" hidden>取消</button>
+    </div>
+    <div id="status" role="status">就绪。</div>
+    <details id="failureDetails" hidden>
+      <summary id="failureSummary">导出提示</summary>
+      <pre id="failureList"></pre>
+    </details>
+    <a id="download" class="download" hidden>下载交付包 ZIP</a>
+    <footer>解压交付包后打开 index.html。</footer>
+    <!-- SCRIPTS -->
+  </body>
+</html>

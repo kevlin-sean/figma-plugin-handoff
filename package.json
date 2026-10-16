@@ -1,0 +1,23 @@
+{
+  "name": "figma-offline-handoff",
+  "version": "1.6.0",
+  "private": true,
+  "type": "module",
+  "description": "Figma plugin that exports an offline HTML handoff package.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.plugin.json --noEmit",
+    "test": "pnpm build && node --test tests/*.test.cjs"
+  },
+  "dependencies": {
+    "jszip": "3.10.1"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.116.0",
+    "@types/node": "^22.15.0",
+    "esbuild": "^0.25.0",
+    "prettier": "^3.5.0",
+    "typescript": "^5.8.0"
+  }
+}
