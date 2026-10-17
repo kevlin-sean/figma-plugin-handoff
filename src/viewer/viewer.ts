@@ -113,27 +113,8 @@ function rgba(c, a = 1) {
   return `rgba(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)}, ${num(a)})`;
 }
 const px = (v) => num(v || 0) + 'px';
-function fontUnit(v) {
-  if (!v || v === 'MIXED') return '混合';
-  return v.unit === 'AUTO' ? '自动' : num(v.value) + (v.unit === 'PERCENT' ? '%' : 'px');
-}
 function copyButton(value, label = '复制') {
   return `<button class="copy" data-copy="${esc(value)}">${label}</button>`;
-}
-function row(k, v) {
-  return `<div class="row"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
-}
-function grid(items) {
-  return (
-    '<div class="grid">' +
-    items
-      .map(([k, v]) => `<div class="prop"><span>${esc(k)}</span><code>${esc(num(v))}</code></div>`)
-      .join('') +
-    '</div>'
-  );
-}
-function section(title, body, sub = '') {
-  return `<section class="section"><h3>${esc(title)}<span>${esc(sub)}</span></h3>${body}</section>`;
 }
 function toast(s) {
   $('toast').textContent = s;
@@ -276,7 +257,7 @@ function toggleLayer(id) {
 function inspectLayer(id) {
   if ($('inspector').hidden) togglePanel('right');
   focusNode(id);
-  panel('inspect');
+  panel();
   scrollLayer(id, true);
 }
 function renderScene() {
@@ -370,7 +351,6 @@ function select(id) {
   drawOverlay();
   renderAssets();
 }
-const sideNames = { top: '上', right: '右', bottom: '下', left: '左' };
 function placeLabel(x, y, w, h, occupied) {
   const gap = 3 / zoom,
     step = h + gap;
@@ -748,7 +728,7 @@ function handleCanvasClick(e) {
   const id = canvasExportSelection(hitIds);
   if (!hitIds.includes(id)) hitIds.unshift(id);
   select(id);
-  panel('inspect');
+  panel();
   const link = e.target.closest('[data-native-download]');
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
     if (link) {
@@ -763,22 +743,6 @@ function activePaints(paints) {
 }
 function bindingFor(n, path) {
   return (n.colorBindings || []).find((b) => b.path === path);
-}
-function bindingLabel(n, path) {
-  const b = bindingFor(n, path);
-  if (!b) return '';
-  return (
-    '<div class="token-name">' +
-    esc(
-      b.variable
-        ? b.variable.name + (b.variable.modeName ? ' · ' + b.variable.modeName : '')
-        : b.style?.name || '',
-    ) +
-    (b.variable
-      ? '<span class="token-badge">变量</span>'
-      : '<span class="token-badge">样式</span>') +
-    '</div>'
-  );
 }
 function paintColorUses(n) {
   const result = [];
@@ -903,17 +867,6 @@ function renderColors() {
       )
       .join('') ||
     '<p class="empty">当前页面没有符合条件的颜色。旧包可展示已有用色；命名变量及样式需用新版插件重新导出。</p>';
-}
-function borderValues(n) {
-  const has = activePaints(n.strokes).length;
-  return Object.fromEntries(
-    Object.keys(sideNames).map((side) => [
-      side,
-      has
-        ? (n['stroke' + side[0].toUpperCase() + side.slice(1) + 'Weight'] ?? n.strokeWeight ?? null)
-        : 0,
-    ]),
-  );
 }
 // MeaXure-style inspector. Detailed hierarchy and layout remain in design.json.
 let displayUnit = 'px',
@@ -1507,14 +1460,7 @@ $('inspectPanel').addEventListener('click', (e) => {
   const s = e.target.closest('[data-select]');
   if (s) select(s.dataset.select);
 });
-$('inspectPanel').addEventListener('change', (e) => {
-  if (e.target.id === 'overlapSelect') select(e.target.value);
-});
-function panel(which) {
-  if (which === 'asset') {
-    setLibrary('asset');
-    return;
-  }
+function panel() {
   if ($('inspector').hidden) togglePanel('right');
 }
 $('unitSelect').onchange = (e) => {

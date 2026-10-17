@@ -25,10 +25,9 @@ function virtualModules() {
             contents: `export const WEBP_CODEC_SOURCE = ${JSON.stringify(source)};\nexport const WEBP_WASM_BASE64 = ${JSON.stringify(wasm)};\n`,
           }
         }
-        const dir = path.join(dist, 'viewer')
         const viewerFiles = {}
         for (const name of ['index.html', 'viewer.css', 'viewer.js', 'spacing.js']) {
-          viewerFiles[name] = fs.readFileSync(path.join(dir, name), 'utf8')
+          viewerFiles[name] = fs.readFileSync(path.join(dist, name), 'utf8')
         }
         return {
           loader: 'ts',
@@ -47,7 +46,7 @@ async function buildViewer() {
     globalName: 'HandoffSpacing',
     platform: 'browser',
     target: 'es2020',
-    outfile: path.join(dist, 'viewer/spacing.cjs'),
+    outfile: path.join(dist, 'spacing.cjs'),
     footer: {
       js: [
         "if (typeof module === 'object' && module.exports) module.exports = HandoffSpacing;",
@@ -60,11 +59,11 @@ async function buildViewer() {
     bundle: false,
     platform: 'browser',
     target: 'es2020',
-    outfile: path.join(dist, 'viewer/viewer.js'),
+    outfile: path.join(dist, 'viewer.js'),
   })
-  fs.copyFileSync(path.join(dist, 'viewer/spacing.cjs'), path.join(dist, 'viewer/spacing.js'))
-  fs.copyFileSync(path.join(root, 'src/viewer/index.html'), path.join(dist, 'viewer/index.html'))
-  fs.copyFileSync(path.join(root, 'src/viewer/viewer.css'), path.join(dist, 'viewer/viewer.css'))
+  fs.copyFileSync(path.join(dist, 'spacing.cjs'), path.join(dist, 'spacing.js'))
+  fs.copyFileSync(path.join(root, 'src/viewer/index.html'), path.join(dist, 'index.html'))
+  fs.copyFileSync(path.join(root, 'src/viewer/viewer.css'), path.join(dist, 'viewer.css'))
 }
 
 async function buildCore() {
@@ -114,13 +113,29 @@ async function buildUi() {
   fs.writeFileSync(path.join(dist, 'ui.html'), html)
 }
 
+function writeManifest() {
+  const manifest = {
+    name: 'Figma 离线交付 · Offline Handoff',
+    id: 'figma-offline-handoff-local',
+    api: '1.0.0',
+    editorType: ['figma'],
+    main: 'code.js',
+    ui: 'ui.html',
+    documentAccess: 'dynamic-page',
+    networkAccess: { allowedDomains: ['none'] },
+  }
+  fs.writeFileSync(path.join(dist, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
+}
+
 async function buildAll() {
-  fs.mkdirSync(path.join(dist, 'viewer'), { recursive: true })
+  fs.mkdirSync(dist, { recursive: true })
   fs.mkdirSync(path.join(dist, 'core'), { recursive: true })
+  fs.rmSync(path.join(dist, 'viewer'), { recursive: true, force: true })
   await buildViewer()
   await Promise.all([buildCore(), buildPlugin(), buildUi()])
+  writeManifest()
   const uiBytes = fs.statSync(path.join(dist, 'ui.html')).size
-  console.log(JSON.stringify({ uiBytes, code: 'dist/code.js', ui: 'dist/ui.html' }))
+  console.log(JSON.stringify({ uiBytes, manifest: 'dist/manifest.json', code: 'dist/code.js', ui: 'dist/ui.html' }))
 }
 
 let building = false

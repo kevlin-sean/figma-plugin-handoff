@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-const root=path.resolve(__dirname,'../dist/viewer');
+const root=path.resolve(__dirname,'../dist');
 class Element{
  constructor(){this.handlers={};this.attributes={};this.value='';this.innerHTML='';this.style={};this.dataset={};this.scrollLeft=0;this.scrollTop=0;this.clientWidth=800;this.clientHeight=850;this.classList={add(){},remove(){},toggle(){}};}
  addEventListener(k,fn){this.handlers[k]=fn}setAttribute(k,v){this.attributes[k]=v}removeAttribute(){}getBoundingClientRect(){return{left:0,top:0}}
