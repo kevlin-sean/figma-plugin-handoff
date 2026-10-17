@@ -78,6 +78,44 @@
   function clean(v) {
     return JSON.parse(JSON.stringify(v, (k, x) => typeof x === "symbol" ? "MIXED" : x));
   }
+  var derivedGeometry = /* @__PURE__ */ new Set([
+    "x",
+    "y",
+    "width",
+    "height",
+    "rotation",
+    "absoluteBoundingBox",
+    "absoluteTransform",
+    "absoluteRenderBounds"
+  ]);
+  function sameValue(a, b) {
+    if (a === b || a === "MIXED" || b === "MIXED") return true;
+    if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) < 1e-4;
+    if (Array.isArray(a) || Array.isArray(b)) {
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+      return a.every((item, index) => sameValue(item, b[index]));
+    }
+    if (a && b && typeof a === "object" && typeof b === "object") {
+      const keys = /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)]);
+      for (const key of keys) if (!sameValue(a[key], b[key])) return false;
+      return true;
+    }
+    return false;
+  }
+  function designEdited(before, after) {
+    if (before.length !== after.length) return true;
+    for (let i = 0; i < before.length; i++) {
+      const left = before[i], right = after[i];
+      if (left.id !== right.id) return true;
+      const keys = /* @__PURE__ */ new Set([...Object.keys(left), ...Object.keys(right)]);
+      for (const key of keys) {
+        if (derivedGeometry.has(key)) continue;
+        if (key === "textSegments" && (left[key] === void 0 || right[key] === void 0)) continue;
+        if (!sameValue(left[key], right[key])) return true;
+      }
+    }
+    return false;
+  }
   function post(type, data) {
     figma.ui.postMessage(Object.assign({ type, runId, channel: bridgeChannel }, data || {}));
   }
@@ -673,7 +711,7 @@
     const endNodes = [], endNative = /* @__PURE__ */ new Map();
     for (const root of roots)
       serialize(root, pageOf(root).id, screenRoots(root), endNodes, endNative);
-    if (initialNodes !== JSON.stringify(endNodes))
+    if (designEdited(nodes, endNodes))
       throw Error("\u5BFC\u51FA\u8FC7\u7A0B\u4E2D\u8BBE\u8BA1\u7A3F\u53D1\u751F\u53D8\u5316\uFF0C\u8BF7\u505C\u6B62\u7F16\u8F91\u540E\u91CD\u65B0\u5BFC\u51FA\u3002");
     for (const item of nodes) if (cssRecords.has(item.id)) item.figmaCSS = cssRecords.get(item.id);
     for (const item of nodes)
