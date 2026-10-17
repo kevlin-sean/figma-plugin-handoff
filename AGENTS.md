@@ -33,6 +33,16 @@ Figma 导入的是构建结果 `dist/manifest.json`，不是源码。`dist/` 不
 
 `design.schemaVersion` 目前是 `1`。破坏包结构时再升版本，并同时改 `code.ts` 里的 `generator`、`package.json` 的 `version` 和 `README.md`。
 
+## 导出并发与页面勾选
+
+`collect` 每次开始时重建两个限额：`limitExport` 共 4 个槽，`limitSection` 同时只合成 1 个 Section。`exportAsync` 在 JS 线程外渲染，返回前大 PNG 一直占内存。槽位按输出像素计：不少于 1600 万像素占满 4 槽，不少于 800 万占 2 槽，其余占 1 槽。SVG 切图按 1 槽。同一图层的多种格式按顺序导出，不同图层共享槽位。
+
+切图身份（`iconMemo`、`graphicMemo`、`fragmentMemo`）要在第一次 `exportAsync` 之前单线程算完，再并行导出。预览失败调用 `haltExport`，之后的 `check()` 让其余任务停下来；`settleAll` 等已发出的任务结束，再抛出第一个错误。取消仍只看 `cancelled`。
+
+面板在页面 id 列表不变时不要重建 `#pages` 里的勾选框，否则选区刷新会丢掉正在取消的那一次点击。名称可以原地更新。「全选」「取消勾选」只改这些框，并刷新「已选 N / M 个 Page」。局部更新隐藏整块范围控件。
+
+`clean()` 把 symbol 写成 `MIXED`，非有限数字写成 `null`，`-0` 写成 `0`。对象仍走 JSON，避免把宿主 getter 和函数写进包。
+
 ## 不能改掉的构建约定
 
 `scripts/build.mjs` 用 esbuild。`package.json` 是 `"type": "module"`，所以给 Node `require` 的产物必须是 `.cjs`。
@@ -71,3 +81,4 @@ pnpm typecheck
 2. 局部更新只替换选中的 Frame / Section 子树，范围外的节点和仍被引用的资源保持原字节。
 3. 失败明细留在当前插件会话，不写进 ZIP，也不写进 `data/update-report.json`。
 4. `pnpm test` 通过后再让 Figma 重新运行插件。已经导入过时，重新构建即可；换了目录要再导入 `dist/manifest.json`。
+5. 页面勾选在目录刷新后保持。预览和切图并行仍受 4 槽与单 Section 合成限额约束。

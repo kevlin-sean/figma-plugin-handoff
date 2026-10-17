@@ -10,7 +10,8 @@ const bridgeChannel =
   Math.random().toString(36).slice(2);
 let busy = false,
   cancelled = false,
-  runId = '';
+  runId = '',
+  stopExport = null;
 const containerTypes = new Set(['FRAME', 'SECTION', 'COMPONENT', 'INSTANCE', 'COMPONENT_SET']);
 const fields = [
   'locked',
@@ -83,6 +84,11 @@ const fields = [
   'textDecoration',
 ];
 function clean(v) {
+  if (typeof v === 'symbol') return 'MIXED';
+  // JSON.stringify turns non-finite numbers into null and collapses -0. Objects still
+  // go through JSON so host getters, functions and nested symbols stay plain data.
+  if (typeof v === 'number') return Number.isFinite(v) ? (v === 0 ? 0 : v) : null;
+  if (v === null || typeof v !== 'object') return v;
   return JSON.parse(JSON.stringify(v, (k, x) => (typeof x === 'symbol' ? 'MIXED' : x)));
 }
 const derivedGeometry = new Set([
@@ -130,7 +136,67 @@ function post(type, data) {
 }
 function check() {
   if (cancelled) throw Error('已取消，原交付包没有变化。');
+  if (stopExport) throw stopExport;
 }
+function haltExport(error) {
+  if (!stopExport) stopExport = error instanceof Error ? error : Error(errorText(error));
+}
+// Figma renders exportAsync off the JS thread, but each large PNG stays resident until
+// it returns. Four slots cover a normal 2× artboard; a near-8192px image takes all of them.
+const exportSlots = 4;
+function exportWeight(width, height, scale) {
+  const pixels = Math.max(1, width) * Math.max(1, height) * scale * scale;
+  if (pixels >= 16e6) return exportSlots;
+  if (pixels >= 8e6) return 2;
+  return 1;
+}
+function cutoutWeight(n, setting) {
+  if (setting.format !== 'PNG') return 1;
+  const c = setting.constraint;
+  let scale = 1;
+  if (c && c.type === 'SCALE') scale = c.value || 1;
+  else if (c && c.type === 'WIDTH' && n.width) scale = c.value / n.width;
+  else if (c && c.type === 'HEIGHT' && n.height) scale = c.value / n.height;
+  return exportWeight(n.width || 1, n.height || 1, scale);
+}
+function createBudget(max) {
+  let used = 0;
+  const waiting = [];
+  function pump() {
+    while (waiting.length && used + waiting[0].cost <= max) {
+      const job = waiting.shift();
+      used += job.cost;
+      job.start();
+    }
+  }
+  return function occupy(cost, task) {
+    const weight = Math.min(max, Math.max(1, cost | 0));
+    return /** @type {Promise<any>} */ (new Promise((resolve, reject) => {
+      waiting.push({
+        cost: weight,
+        start() {
+          Promise.resolve()
+            .then(task)
+            .then(resolve, reject)
+            .finally(() => {
+              used -= weight;
+              pump();
+            });
+        },
+      });
+      pump();
+    }));
+  };
+}
+function settleAll(tasks) {
+  return Promise.all(tasks).catch((error) =>
+    Promise.allSettled(tasks).then(() => {
+      throw error;
+    }),
+  );
+}
+let limitExport = createBudget(exportSlots);
+let limitSection = createBudget(1);
 function catalog(requestId = null) {
   post('catalog', {
     requestId,
@@ -276,7 +342,9 @@ const iconShapes = new Set([
   'REGULAR_POLYGON',
 ]);
 const iconContainers = new Set(['GROUP', 'FRAME', 'COMPONENT', 'INSTANCE', 'BOOLEAN_OPERATION']);
-let iconMemo = new Map();
+let iconMemo = new Map(),
+  graphicMemo = new Map(),
+  fragmentMemo = new Map();
 function namedIcon(n) {
   return /图标|(^|[^a-z0-9])(icons?|ico?)([^a-z0-9]|$)|icons?$/i.test(String(n?.name || ''));
 }
@@ -300,13 +368,18 @@ function withinIconSize(n) {
   return long <= cap + 0.5;
 }
 function graphicTree(n) {
-  if (n.visible === false) return true;
-  if (n.type === 'TEXT' || n.type === 'SLICE' || hasImagePaint(n)) return false;
-  const kids = n.children || [];
-  if (iconShapes.has(n.type) || n.type === 'RECTANGLE') return kids.every(graphicTree);
-  if (iconContainers.has(n.type))
-    return kids.some((c) => c.visible !== false) && kids.every(graphicTree);
-  return false;
+  if (n?.id && graphicMemo.has(n.id)) return graphicMemo.get(n.id);
+  let ok = false;
+  if (n.visible === false) ok = true;
+  else if (n.type === 'TEXT' || n.type === 'SLICE' || hasImagePaint(n)) ok = false;
+  else {
+    const kids = n.children || [];
+    if (iconShapes.has(n.type) || n.type === 'RECTANGLE') ok = kids.every(graphicTree);
+    else if (iconContainers.has(n.type))
+      ok = kids.some((c) => c.visible !== false) && kids.every(graphicTree);
+  }
+  if (n?.id) graphicMemo.set(n.id, ok);
+  return ok;
 }
 function hasDrawing(n) {
   if (n.visible === false) return false;
@@ -324,22 +397,35 @@ function boxesOverlap(a, b) {
     B.y < A.y + A.height - 0.5
   );
 }
+function fragmentSet(parent) {
+  if (fragmentMemo.has(parent.id)) return fragmentMemo.get(parent.id);
+  const ids = new Set();
+  fragmentMemo.set(parent.id, ids);
+  const leaves = (parent.children || []).filter(
+    (c) =>
+      c.visible !== false &&
+      iconShapes.has(c.type) &&
+      !(c.children || []).some((k) => k.visible !== false),
+  );
+  if (leaves.length < 4) return ids;
+  for (const leaf of leaves) {
+    if (namedIcon(leaf)) continue;
+    let overlaps = 0;
+    for (const other of leaves)
+      if (other !== leaf && boxesOverlap(leaf, other) && ++overlaps >= 2) {
+        ids.add(leaf.id);
+        break;
+      }
+  }
+  return ids;
+}
 function isIllustrationFragment(n) {
   // Overlapping paths inside a large graphic are illustration detail, not icons.
   if (!iconShapes.has(n.type) || (n.children || []).some((c) => c.visible !== false)) return false;
   const p = n.parent;
   if (!p || p.type === 'PAGE' || p.type === 'COMPONENT' || p.type === 'INSTANCE') return false;
   if (namedIcon(n) || namedIcon(p) || Math.max(p.width || 0, p.height || 0) <= 96) return false;
-  const leaves = (p.children || []).filter(
-    (c) =>
-      c.visible !== false &&
-      iconShapes.has(c.type) &&
-      !(c.children || []).some((k) => k.visible !== false),
-  );
-  if (leaves.length < 4) return false;
-  let overlaps = 0;
-  for (const other of leaves) if (other !== n && boxesOverlap(n, other) && ++overlaps >= 2) return true;
-  return false;
+  return fragmentSet(p).has(n.id);
 }
 function isAutoIcon(n) {
   if (!n?.id) return false;
@@ -469,7 +555,7 @@ function matchesRaster(size, b, scale) {
 }
 
 /** Export one PNG preview, retrying render bounds when needed. */
-async function raster(n, requestedScale) {
+async function drawRaster(n, requestedScale) {
   const box = n.absoluteBoundingBox,
     render = n.absoluteRenderBounds;
   if (!validBox(box)) throw Error('画板尺寸无效：' + n.name + '（' + n.id + '）');
@@ -502,6 +588,21 @@ async function raster(n, requestedScale) {
     }
   }
   throw Error('预览导出失败：' + n.name + '（' + n.id + '）。' + errors.join('；'));
+}
+async function raster(n, requestedScale, onStart = null): Promise<any> {
+  const box = n.absoluteBoundingBox || {};
+  const long = Math.max(box.width || 1, box.height || 1, 1);
+  const scale = Math.min(requestedScale, 8192 / long);
+  return limitExport(exportWeight(box.width || 1, box.height || 1, scale), async () => {
+    try {
+      check();
+      if (onStart) onStart();
+      return await drawRaster(n, requestedScale);
+    } catch (e) {
+      if (!cancelled) haltExport(e);
+      throw stopExport || e;
+    }
+  });
 }
 function sectionCanCompose(n) {
   if (n.type !== 'SECTION') return true;
@@ -588,17 +689,21 @@ async function exportPreview(n, requestedScale, prefix, warnings) {
       pixelHeight: p.pixelHeight,
     };
   }
-  const fragments = [],
-    tiles = [];
-  async function visit(child) {
+  // One composite at a time: its tiles already share the export slots.
+  return limitSection(1, () => composeSection(n, b, requestedScale, prefix, warnings));
+}
+async function composeSection(n, b, requestedScale, prefix, warnings) {
+  check();
+  const parts = [];
+  function plan(child) {
     check();
     if (!visible(child)) return;
     if (child.type === 'SECTION') {
       const cb = child.absoluteBoundingBox;
       if (!validBox(cb)) return;
-      fragments.push(sectionPaint(child, { ...cb, x: cb.x - b.x, y: cb.y - b.y }));
+      parts.push({ paint: sectionPaint(child, { ...cb, x: cb.x - b.x, y: cb.y - b.y }) });
       // Hidden Section contents are an editor presentation state, not deletion.
-      for (const c of child.children || []) await visit(c);
+      for (const c of child.children || []) plan(c);
       return;
     }
     // Keep groups/frames atomic: their internal masks, clipping and effects are
@@ -606,15 +711,36 @@ async function exportPreview(n, requestedScale, prefix, warnings) {
     if (child.type === 'SLICE' || child.opacity === 0 || !validBox(child.absoluteBoundingBox))
       return;
     if ('absoluteRenderBounds' in child && child.absoluteRenderBounds === null) return;
-    post('progress', { message: `区域 ${n.name}：预览 ${tiles.length + 1} · ${child.name}` });
-    const p = await raster(child, requestedScale),
+    parts.push({ node: child });
+  }
+  plan(n);
+  const rasters = parts.filter((part) => part.node);
+  await settleAll(
+    rasters.map((part, index) =>
+      raster(part.node, requestedScale, () => {
+        post('progress', {
+          message: `区域 ${n.name}：预览 ${index + 1}/${rasters.length} · ${part.node.name}`,
+        });
+      }).then((preview) => {
+        part.preview = preview;
+      }),
+    ),
+  );
+  const fragments = [],
+    tiles = [];
+  for (const part of parts) {
+    if ('paint' in part) {
+      if (part.paint) fragments.push(part.paint);
+      continue;
+    }
+    const p = part.preview,
       x = p.bounds.x - b.x,
       y = p.bounds.y - b.y;
     fragments.push(
       `<image x="${x}" y="${y}" width="${p.bounds.width}" height="${p.bounds.height}" preserveAspectRatio="none" href="data:image/png;base64,${figma.base64Encode(p.bytes)}"/>`,
     );
     tiles.push({
-      nodeId: child.id,
+      nodeId: part.node.id,
       x,
       y,
       width: p.bounds.width,
@@ -625,10 +751,9 @@ async function exportPreview(n, requestedScale, prefix, warnings) {
     });
     if (p.scale < requestedScale)
       warnings.push(
-        '预览 ' + child.name + ' 已按单张 8192px 上限降至 ' + Number(p.scale.toFixed(4)) + '×。',
+        '预览 ' + part.node.name + ' 已按单张 8192px 上限降至 ' + Number(p.scale.toFixed(4)) + '×。',
       );
   }
-  await visit(n);
   check();
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${b.width}" height="${b.height}" viewBox="0 0 ${b.width} ${b.height}">${fragments.join('')}</svg>`;
   // The generated XML contains numeric geometry and Base64 only (ASCII).
@@ -652,6 +777,9 @@ async function exportPreview(n, requestedScale, prefix, warnings) {
 
 /** Read-only export. Archive bytes are assembled in the UI. */
 async function collect(options) {
+  stopExport = null;
+  limitExport = createBudget(exportSlots);
+  limitSection = createBudget(1);
   check();
   const roots = [],
     pages = [];
@@ -688,120 +816,155 @@ async function collect(options) {
     assets = [],
     warnings = [],
     assetFailures = [];
+  post('progress', { message: `读取图层：${roots.length} 个区域` });
   for (const root of roots) {
     const nav = screenRoots(root);
     navigation.push(...nav);
     serialize(root, pageOf(root).id, nav, nodes, natives);
   }
-  const initialNodes = JSON.stringify(nodes);
   const prefix = 'r-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
-  for (let i = 0; i < roots.length; i++) {
-    check();
-    const n = roots[i];
-    post('progress', { message: `设计稿 ${i + 1}/${roots.length}：${n.name}` });
-    previews.push(await exportPreview(n, Number(options.previewScale) || 2, prefix, warnings));
-  }
+  const previewScale = Number(options.previewScale) || 2;
+  previews.push(
+    ...(await settleAll(
+      roots.map((n, i) => {
+        post('progress', { message: `设计稿 ${i + 1}/${roots.length}：${n.name}` });
+        return exportPreview(n, previewScale, prefix, warnings);
+      }),
+    )),
+  );
   // Explicit SVG/PNG exports, plus icon-sized graphics that were never marked.
-  let count = 0;
+  // Plan every cutout before the first exportAsync so icon identity stays single-threaded.
   iconMemo = new Map();
+  graphicMemo = new Map();
+  fragmentMemo = new Map();
+  const groups = [];
+  let cutoutCount = 0;
+  post('progress', { message: `整理切图：${nodes.length} 个图层` });
   for (const data of nodes) {
     check();
     const n = natives.get(data.id);
     if (!data.visible || data.opacity === 0 || data.width <= 0 || data.height <= 0) continue;
     const plan = exportPlan(n);
     if (!plan) continue;
-    const settings = plan.settings;
-    for (let j = 0; j < settings.length; j++) {
-      check();
-      const setting = Object.assign({}, settings[j]);
+    const jobs = [];
+    for (let j = 0; j < plan.settings.length; j++) {
+      const setting = Object.assign({}, plan.settings[j]);
       setting.contentsOnly = true;
       if (setting.format === 'SVG') setting.svgOutlineText = true;
-      post('progress', { message: `切图 ${++count}：${n.name}` });
-      try {
-        const bytes = await n.exportAsync(setting);
+      jobs.push({ setting, j, index: cutoutCount++ });
+    }
+    // One node keeps its formats in order. Different nodes share the export slots.
+    groups.push({
+      data,
+      n,
+      plan,
+      jobs,
+      weight: Math.max(...jobs.map((job) => cutoutWeight(n, job.setting))),
+    });
+  }
+  const outcomes = new Array(cutoutCount);
+  await settleAll(
+    groups.map((group) =>
+      limitExport(group.weight, async () => {
         check();
-        const format = setting.format.toLowerCase(),
-          path = `assets/${prefix}-${safeId(n.id)}-${j}.${format}`;
-        const rb = n.absoluteRenderBounds || n.absoluteBoundingBox;
-        let scale = 1;
-        if (setting.constraint) {
-          const c = setting.constraint;
-          const area = setting.useAbsoluteBounds ? n.absoluteBoundingBox : rb;
-          scale =
-            c.type === 'SCALE'
-              ? c.value
-              : c.value / (c.type === 'WIDTH' ? area.width : area.height);
-        }
-        const a = {
-          id: n.id + '-' + j,
-          name: n.name,
-          width: n.width,
-          height: n.height,
-          format,
-          frameId: data.frameId,
-          regionId: data.regionId,
-          path,
-          bytes: bytes.length,
-          nodeIds: [n.id],
-          uses: [
-            {
-              nodeId: n.id,
+        const { data, n, plan } = group;
+        for (const job of group.jobs) {
+          check();
+          const { setting, j, index } = job;
+          post('progress', { message: `切图 ${index + 1}/${cutoutCount}：${n.name}` });
+          try {
+            const bytes = await n.exportAsync(setting);
+            check();
+            const format = setting.format.toLowerCase(),
+              path = `assets/${prefix}-${safeId(n.id)}-${j}.${format}`;
+            const rb = n.absoluteRenderBounds || n.absoluteBoundingBox;
+            let scale = 1;
+            if (setting.constraint) {
+              const c = setting.constraint;
+              const area = setting.useAbsoluteBounds ? n.absoluteBoundingBox : rb;
+              scale =
+                c.type === 'SCALE'
+                  ? c.value
+                  : c.value / (c.type === 'WIDTH' ? area.width : area.height);
+            }
+            const asset = {
+              id: n.id + '-' + j,
               name: n.name,
-              frameId: data.frameId,
-              regionId: data.regionId,
               width: n.width,
               height: n.height,
-            },
-          ],
-          scale,
-          scaleLabel: format === 'svg' ? '矢量' : Math.round(scale * 100) / 100 + '×',
-          exportSettings: clean(setting),
-        };
-        if (format === 'png') Object.assign(a, pngSize(bytes));
-        post('file', { path, bytes });
-        assets.push(a);
-      } catch (e) {
-        if (cancelled) throw e;
-        const frame = natives.get(data.frameId),
-          region = natives.get(data.regionId),
-          page = pageOf(n),
-          nodePath = [];
-        for (let parent = n; parent && parent.type !== 'PAGE'; parent = parent.parent)
-          nodePath.unshift({ id: parent.id, name: parent.name });
-        const failure = {
-          nodeId: n.id,
-          nodeName: n.name,
-          pageId: page.id,
-          pageName: page.name,
-          regionId: data.regionId,
-          regionName: region?.name || data.regionId,
-          frameId: data.frameId,
-          frameName: frame?.name || data.frameId,
-          nodePath,
-          format: setting.format,
-          exportSettings: clean(setting),
-          source: plan.source,
-          message: errorText(e),
-        };
-        assetFailures.push(failure);
-        const message =
-          '切图导出失败：' +
-          page.name +
-          ' / ' +
-          failure.frameName +
-          '（' +
-          data.frameId +
-          '） / ' +
-          n.name +
-          '（' +
-          n.id +
-          '） [' +
-          setting.format +
-          '] ' +
-          failure.message;
-        post('asset-warning', { message, failure });
-      }
-    }
+              format,
+              frameId: data.frameId,
+              regionId: data.regionId,
+              path,
+              bytes: bytes.length,
+              nodeIds: [n.id],
+              uses: [
+                {
+                  nodeId: n.id,
+                  name: n.name,
+                  frameId: data.frameId,
+                  regionId: data.regionId,
+                  width: n.width,
+                  height: n.height,
+                },
+              ],
+              scale,
+              scaleLabel: format === 'svg' ? '矢量' : Math.round(scale * 100) / 100 + '×',
+              exportSettings: clean(setting),
+            };
+            if (format === 'png') Object.assign(asset, pngSize(bytes));
+            post('file', { path, bytes });
+            outcomes[index] = asset;
+          } catch (e) {
+            if (cancelled) throw e;
+            const frame = natives.get(data.frameId),
+              region = natives.get(data.regionId),
+              page = pageOf(n),
+              nodePath = [];
+            for (let parent = n; parent && parent.type !== 'PAGE'; parent = parent.parent)
+              nodePath.unshift({ id: parent.id, name: parent.name });
+            const failure = {
+              nodeId: n.id,
+              nodeName: n.name,
+              pageId: page.id,
+              pageName: page.name,
+              regionId: data.regionId,
+              regionName: region?.name || data.regionId,
+              frameId: data.frameId,
+              frameName: frame?.name || data.frameId,
+              nodePath,
+              format: setting.format,
+              exportSettings: clean(setting),
+              source: plan.source,
+              message: errorText(e),
+            };
+            const message =
+              '切图导出失败：' +
+              page.name +
+              ' / ' +
+              failure.frameName +
+              '（' +
+              data.frameId +
+              '） / ' +
+              n.name +
+              '（' +
+              n.id +
+              '） [' +
+              setting.format +
+              '] ' +
+              failure.message;
+            outcomes[index] = { failure, message };
+          }
+        }
+      }),
+    ),
+  );
+  for (const outcome of outcomes) {
+    if (!outcome) continue;
+    if (outcome.failure) {
+      assetFailures.push(outcome.failure);
+      post('asset-warning', { message: outcome.message, failure: outcome.failure });
+    } else assets.push(outcome);
   }
   check();
   // Keep asynchronous CSS separate from the geometry snapshot until validation.

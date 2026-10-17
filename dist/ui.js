@@ -3684,6 +3684,8 @@ if (typeof window === 'object' && window) window.HandoffSpacing = HandoffSpacing
     $("export").disabled = value;
     $("cancel").hidden = !value;
     $("refreshSelection").disabled = value;
+    $("checkPages").disabled = value;
+    $("clearPages").disabled = value;
   }
   function hideDownload() {
     if (downloadUrl) URL.revokeObjectURL(downloadUrl);
@@ -3701,8 +3703,21 @@ if (typeof window === 'object' && window) window.HandoffSpacing = HandoffSpacing
       const ids = new Set(baseline.design.nodes.map((n) => n.id));
       const matches = state.selection.filter((n) => ids.has(n.id));
       $("scopeInfo").textContent = `\u65E7\u5305\u5339\u914D ${matches.length}/${state.selection.length} \u4E2A\u76EE\u6807\u3002\u8BF7\u9009\u62E9\u4E92\u4E0D\u5305\u542B\u7684 Frame / Section\u3002`;
+    } else if (mode() !== "update" && scope() === "pages") {
+      const labels = [...$("pages").children];
+      const count = labels.filter((label) => label.children[0]?.checked).length;
+      $("scopeInfo").textContent = labels.length ? `\u5DF2\u9009 ${count} / ${labels.length} \u4E2A Page` : "";
     } else $("scopeInfo").textContent = "";
   }
+  function pageChecks() {
+    return [...$("pages").children].map((label) => label.children[0]).filter(Boolean);
+  }
+  function setAllPages(checked) {
+    for (const input of pageChecks()) input.checked = checked;
+    scopeInfo();
+  }
+  $("checkPages").onclick = () => setAllPages(true);
+  $("clearPages").onclick = () => setAllPages(false);
   function modes() {
     const update = mode() === "update";
     $("oldPanel").hidden = !update;
@@ -4072,19 +4087,25 @@ ${report.summary.pages} \u9875\u9762 \xB7 ${report.summary.nodes} \u56FE\u5C42 \
     if (!m || m.channel !== BRIDGE_CHANNEL) return;
     if (m.type === "catalog") {
       if (!Array.isArray(m.pages) || !Array.isArray(m.selection)) return;
-      const first = !state.pages.length, known = new Set(state.pages.map((p) => p.id)), checked = new Set(
-        [...document.querySelectorAll("#pages input:checked")].map((el) => el.value)
-      );
+      const first = !state.pages.length, known = new Set(state.pages.map((p) => p.id)), inputs = pageChecks(), checked = new Set(inputs.filter((el) => el.checked).map((el) => el.value)), same2 = inputs.length === m.pages.length && m.pages.every((p, i) => inputs[i].value === p.id);
       state = m;
-      $("pages").replaceChildren();
-      for (const p of m.pages) {
-        const label = document.createElement("label"), input = document.createElement("input");
-        input.type = "checkbox";
-        input.value = p.id;
-        input.checked = first ? p.id === m.currentPage : known.has(p.id) && checked.has(p.id);
-        input.disabled = working;
-        label.append(input, document.createTextNode(p.name));
-        $("pages").append(label);
+      if (same2) {
+        m.pages.forEach((p, i) => {
+          inputs[i].disabled = working;
+          if (inputs[i].nextSibling) inputs[i].nextSibling.textContent = p.name;
+        });
+      } else {
+        $("pages").replaceChildren();
+        for (const p of m.pages) {
+          const label = document.createElement("label"), input = document.createElement("input");
+          input.type = "checkbox";
+          input.value = p.id;
+          input.checked = first ? p.id === m.currentPage : known.has(p.id) && checked.has(p.id);
+          input.disabled = working;
+          input.onchange = scopeInfo;
+          label.append(input, document.createTextNode(p.name));
+          $("pages").append(label);
+        }
       }
       scopeInfo();
       namePreview();

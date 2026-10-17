@@ -4,6 +4,7 @@
   var busy = false;
   var cancelled = false;
   var runId = "";
+  var stopExport = null;
   var containerTypes = /* @__PURE__ */ new Set(["FRAME", "SECTION", "COMPONENT", "INSTANCE", "COMPONENT_SET"]);
   var fields = [
     "locked",
@@ -76,6 +77,9 @@
     "textDecoration"
   ];
   function clean(v) {
+    if (typeof v === "symbol") return "MIXED";
+    if (typeof v === "number") return Number.isFinite(v) ? v === 0 ? 0 : v : null;
+    if (v === null || typeof v !== "object") return v;
     return JSON.parse(JSON.stringify(v, (k, x) => typeof x === "symbol" ? "MIXED" : x));
   }
   var derivedGeometry = /* @__PURE__ */ new Set([
@@ -121,7 +125,65 @@
   }
   function check() {
     if (cancelled) throw Error("\u5DF2\u53D6\u6D88\uFF0C\u539F\u4EA4\u4ED8\u5305\u6CA1\u6709\u53D8\u5316\u3002");
+    if (stopExport) throw stopExport;
   }
+  function haltExport(error) {
+    if (!stopExport) stopExport = error instanceof Error ? error : Error(errorText(error));
+  }
+  var exportSlots = 4;
+  function exportWeight(width, height, scale) {
+    const pixels = Math.max(1, width) * Math.max(1, height) * scale * scale;
+    if (pixels >= 16e6) return exportSlots;
+    if (pixels >= 8e6) return 2;
+    return 1;
+  }
+  function cutoutWeight(n, setting) {
+    if (setting.format !== "PNG") return 1;
+    const c = setting.constraint;
+    let scale = 1;
+    if (c && c.type === "SCALE") scale = c.value || 1;
+    else if (c && c.type === "WIDTH" && n.width) scale = c.value / n.width;
+    else if (c && c.type === "HEIGHT" && n.height) scale = c.value / n.height;
+    return exportWeight(n.width || 1, n.height || 1, scale);
+  }
+  function createBudget(max) {
+    let used = 0;
+    const waiting = [];
+    function pump() {
+      while (waiting.length && used + waiting[0].cost <= max) {
+        const job = waiting.shift();
+        used += job.cost;
+        job.start();
+      }
+    }
+    return function occupy(cost, task) {
+      const weight = Math.min(max, Math.max(1, cost | 0));
+      return (
+        /** @type {Promise<any>} */
+        new Promise((resolve, reject) => {
+          waiting.push({
+            cost: weight,
+            start() {
+              Promise.resolve().then(task).then(resolve, reject).finally(() => {
+                used -= weight;
+                pump();
+              });
+            }
+          });
+          pump();
+        })
+      );
+    };
+  }
+  function settleAll(tasks) {
+    return Promise.all(tasks).catch(
+      (error) => Promise.allSettled(tasks).then(() => {
+        throw error;
+      })
+    );
+  }
+  var limitExport = createBudget(exportSlots);
+  var limitSection = createBudget(1);
   function catalog(requestId = null) {
     post("catalog", {
       requestId,
@@ -256,6 +318,8 @@
   ]);
   var iconContainers = /* @__PURE__ */ new Set(["GROUP", "FRAME", "COMPONENT", "INSTANCE", "BOOLEAN_OPERATION"]);
   var iconMemo = /* @__PURE__ */ new Map();
+  var graphicMemo = /* @__PURE__ */ new Map();
+  var fragmentMemo = /* @__PURE__ */ new Map();
   function namedIcon(n) {
     return /图标|(^|[^a-z0-9])(icons?|ico?)([^a-z0-9]|$)|icons?$/i.test(String(n?.name || ""));
   }
@@ -277,13 +341,18 @@
     return long <= cap + 0.5;
   }
   function graphicTree(n) {
-    if (n.visible === false) return true;
-    if (n.type === "TEXT" || n.type === "SLICE" || hasImagePaint(n)) return false;
-    const kids = n.children || [];
-    if (iconShapes.has(n.type) || n.type === "RECTANGLE") return kids.every(graphicTree);
-    if (iconContainers.has(n.type))
-      return kids.some((c) => c.visible !== false) && kids.every(graphicTree);
-    return false;
+    if (n?.id && graphicMemo.has(n.id)) return graphicMemo.get(n.id);
+    let ok = false;
+    if (n.visible === false) ok = true;
+    else if (n.type === "TEXT" || n.type === "SLICE" || hasImagePaint(n)) ok = false;
+    else {
+      const kids = n.children || [];
+      if (iconShapes.has(n.type) || n.type === "RECTANGLE") ok = kids.every(graphicTree);
+      else if (iconContainers.has(n.type))
+        ok = kids.some((c) => c.visible !== false) && kids.every(graphicTree);
+    }
+    if (n?.id) graphicMemo.set(n.id, ok);
+    return ok;
   }
   function hasDrawing(n) {
     if (n.visible === false) return false;
@@ -295,18 +364,31 @@
     if (!validBox(A) || !validBox(B)) return false;
     return A.x < B.x + B.width - 0.5 && B.x < A.x + A.width - 0.5 && A.y < B.y + B.height - 0.5 && B.y < A.y + A.height - 0.5;
   }
+  function fragmentSet(parent) {
+    if (fragmentMemo.has(parent.id)) return fragmentMemo.get(parent.id);
+    const ids = /* @__PURE__ */ new Set();
+    fragmentMemo.set(parent.id, ids);
+    const leaves = (parent.children || []).filter(
+      (c) => c.visible !== false && iconShapes.has(c.type) && !(c.children || []).some((k) => k.visible !== false)
+    );
+    if (leaves.length < 4) return ids;
+    for (const leaf of leaves) {
+      if (namedIcon(leaf)) continue;
+      let overlaps = 0;
+      for (const other of leaves)
+        if (other !== leaf && boxesOverlap(leaf, other) && ++overlaps >= 2) {
+          ids.add(leaf.id);
+          break;
+        }
+    }
+    return ids;
+  }
   function isIllustrationFragment(n) {
     if (!iconShapes.has(n.type) || (n.children || []).some((c) => c.visible !== false)) return false;
     const p = n.parent;
     if (!p || p.type === "PAGE" || p.type === "COMPONENT" || p.type === "INSTANCE") return false;
     if (namedIcon(n) || namedIcon(p) || Math.max(p.width || 0, p.height || 0) <= 96) return false;
-    const leaves = (p.children || []).filter(
-      (c) => c.visible !== false && iconShapes.has(c.type) && !(c.children || []).some((k) => k.visible !== false)
-    );
-    if (leaves.length < 4) return false;
-    let overlaps = 0;
-    for (const other of leaves) if (other !== n && boxesOverlap(n, other) && ++overlaps >= 2) return true;
-    return false;
+    return fragmentSet(p).has(n.id);
   }
   function isAutoIcon(n) {
     if (!n?.id) return false;
@@ -403,7 +485,7 @@
   function matchesRaster(size, b, scale) {
     return Math.abs(size.pixelWidth - b.width * scale) <= 2 && Math.abs(size.pixelHeight - b.height * scale) <= 2;
   }
-  async function raster(n, requestedScale) {
+  async function drawRaster(n, requestedScale) {
     const box = n.absoluteBoundingBox, render = n.absoluteRenderBounds;
     if (!validBox(box)) throw Error("\u753B\u677F\u5C3A\u5BF8\u65E0\u6548\uFF1A" + n.name + "\uFF08" + n.id + "\uFF09");
     const attempts = [{ bounds: box, absolute: true }];
@@ -434,6 +516,21 @@
       }
     }
     throw Error("\u9884\u89C8\u5BFC\u51FA\u5931\u8D25\uFF1A" + n.name + "\uFF08" + n.id + "\uFF09\u3002" + errors.join("\uFF1B"));
+  }
+  async function raster(n, requestedScale, onStart = null) {
+    const box = n.absoluteBoundingBox || {};
+    const long = Math.max(box.width || 1, box.height || 1, 1);
+    const scale = Math.min(requestedScale, 8192 / long);
+    return limitExport(exportWeight(box.width || 1, box.height || 1, scale), async () => {
+      try {
+        check();
+        if (onStart) onStart();
+        return await drawRaster(n, requestedScale);
+      } catch (e) {
+        if (!cancelled) haltExport(e);
+        throw stopExport || e;
+      }
+    });
   }
   function sectionCanCompose(n) {
     if (n.type !== "SECTION") return true;
@@ -481,15 +578,15 @@
     if (n.type !== "SECTION" || !sectionCanCompose(n)) {
       if (n.type === "SECTION")
         warnings.push("\u533A\u57DF " + n.name + " \u542B\u590D\u6742\u80CC\u666F\u6216\u8DE8\u56FE\u5C42\u5408\u6210\uFF0C\u4F7F\u7528 Figma \u6574\u533A\u6E32\u67D3\u4EE5\u4FDD\u7559\u6548\u679C\u3002");
-      const p = await raster(n, requestedScale), path2 = `previews/${prefix}-${safeId(n.id)}.png`;
-      post("file", { path: path2, bytes: p.bytes });
+      const p = await raster(n, requestedScale), path = `previews/${prefix}-${safeId(n.id)}.png`;
+      post("file", { path, bytes: p.bytes });
       if (p.scale < requestedScale)
         warnings.push(
           "\u9884\u89C8 " + n.name + " \u5DF2\u6309\u5355\u5F20 8192px \u4E0A\u9650\u964D\u81F3 " + Number(p.scale.toFixed(4)) + "\xD7\u3002"
         );
       return {
         id: n.id,
-        path: path2,
+        path,
         scale: p.scale,
         inset: 0,
         offsetX: p.bounds.x - b.x,
@@ -500,27 +597,51 @@
         pixelHeight: p.pixelHeight
       };
     }
-    const fragments = [], tiles = [];
-    async function visit(child) {
+    return limitSection(1, () => composeSection(n, b, requestedScale, prefix, warnings));
+  }
+  async function composeSection(n, b, requestedScale, prefix, warnings) {
+    check();
+    const parts = [];
+    function plan(child) {
       check();
       if (!visible(child)) return;
       if (child.type === "SECTION") {
         const cb = child.absoluteBoundingBox;
         if (!validBox(cb)) return;
-        fragments.push(sectionPaint(child, { ...cb, x: cb.x - b.x, y: cb.y - b.y }));
-        for (const c of child.children || []) await visit(c);
+        parts.push({ paint: sectionPaint(child, { ...cb, x: cb.x - b.x, y: cb.y - b.y }) });
+        for (const c of child.children || []) plan(c);
         return;
       }
       if (child.type === "SLICE" || child.opacity === 0 || !validBox(child.absoluteBoundingBox))
         return;
       if ("absoluteRenderBounds" in child && child.absoluteRenderBounds === null) return;
-      post("progress", { message: `\u533A\u57DF ${n.name}\uFF1A\u9884\u89C8 ${tiles.length + 1} \xB7 ${child.name}` });
-      const p = await raster(child, requestedScale), x = p.bounds.x - b.x, y = p.bounds.y - b.y;
+      parts.push({ node: child });
+    }
+    plan(n);
+    const rasters = parts.filter((part) => part.node);
+    await settleAll(
+      rasters.map(
+        (part, index) => raster(part.node, requestedScale, () => {
+          post("progress", {
+            message: `\u533A\u57DF ${n.name}\uFF1A\u9884\u89C8 ${index + 1}/${rasters.length} \xB7 ${part.node.name}`
+          });
+        }).then((preview) => {
+          part.preview = preview;
+        })
+      )
+    );
+    const fragments = [], tiles = [];
+    for (const part of parts) {
+      if ("paint" in part) {
+        if (part.paint) fragments.push(part.paint);
+        continue;
+      }
+      const p = part.preview, x = p.bounds.x - b.x, y = p.bounds.y - b.y;
       fragments.push(
         `<image x="${x}" y="${y}" width="${p.bounds.width}" height="${p.bounds.height}" preserveAspectRatio="none" href="data:image/png;base64,${figma.base64Encode(p.bytes)}"/>`
       );
       tiles.push({
-        nodeId: child.id,
+        nodeId: part.node.id,
         x,
         y,
         width: p.bounds.width,
@@ -531,10 +652,9 @@
       });
       if (p.scale < requestedScale)
         warnings.push(
-          "\u9884\u89C8 " + child.name + " \u5DF2\u6309\u5355\u5F20 8192px \u4E0A\u9650\u964D\u81F3 " + Number(p.scale.toFixed(4)) + "\xD7\u3002"
+          "\u9884\u89C8 " + part.node.name + " \u5DF2\u6309\u5355\u5F20 8192px \u4E0A\u9650\u964D\u81F3 " + Number(p.scale.toFixed(4)) + "\xD7\u3002"
         );
     }
-    await visit(n);
     check();
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${b.width}" height="${b.height}" viewBox="0 0 ${b.width} ${b.height}">${fragments.join("")}</svg>`;
     const bytes = new Uint8Array(svg.length);
@@ -555,6 +675,9 @@
     };
   }
   async function collect(options) {
+    stopExport = null;
+    limitExport = createBudget(exportSlots);
+    limitSection = createBudget(1);
     check();
     const roots = [], pages = [];
     if (options.mode === "update" || options.scope === "selection") {
@@ -584,98 +707,131 @@
     }
     if (!roots.length) throw Error("\u6240\u9009\u8303\u56F4\u6CA1\u6709\u53EF\u89C1\u7684 Frame \u6216 Section\u3002");
     const nodes = [], natives = /* @__PURE__ */ new Map(), navigation = [], previews = [], assets = [], warnings = [], assetFailures = [];
+    post("progress", { message: `\u8BFB\u53D6\u56FE\u5C42\uFF1A${roots.length} \u4E2A\u533A\u57DF` });
     for (const root of roots) {
       const nav = screenRoots(root);
       navigation.push(...nav);
       serialize(root, pageOf(root).id, nav, nodes, natives);
     }
-    const initialNodes = JSON.stringify(nodes);
     const prefix = "r-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
-    for (let i = 0; i < roots.length; i++) {
-      check();
-      const n = roots[i];
-      post("progress", { message: `\u8BBE\u8BA1\u7A3F ${i + 1}/${roots.length}\uFF1A${n.name}` });
-      previews.push(await exportPreview(n, Number(options.previewScale) || 2, prefix, warnings));
-    }
-    let count = 0;
+    const previewScale = Number(options.previewScale) || 2;
+    previews.push(
+      ...await settleAll(
+        roots.map((n, i) => {
+          post("progress", { message: `\u8BBE\u8BA1\u7A3F ${i + 1}/${roots.length}\uFF1A${n.name}` });
+          return exportPreview(n, previewScale, prefix, warnings);
+        })
+      )
+    );
     iconMemo = /* @__PURE__ */ new Map();
+    graphicMemo = /* @__PURE__ */ new Map();
+    fragmentMemo = /* @__PURE__ */ new Map();
+    const groups = [];
+    let cutoutCount = 0;
+    post("progress", { message: `\u6574\u7406\u5207\u56FE\uFF1A${nodes.length} \u4E2A\u56FE\u5C42` });
     for (const data of nodes) {
       check();
       const n = natives.get(data.id);
       if (!data.visible || data.opacity === 0 || data.width <= 0 || data.height <= 0) continue;
       const plan = exportPlan(n);
       if (!plan) continue;
-      const settings = plan.settings;
-      for (let j = 0; j < settings.length; j++) {
-        check();
-        const setting = Object.assign({}, settings[j]);
+      const jobs = [];
+      for (let j = 0; j < plan.settings.length; j++) {
+        const setting = Object.assign({}, plan.settings[j]);
         setting.contentsOnly = true;
         if (setting.format === "SVG") setting.svgOutlineText = true;
-        post("progress", { message: `\u5207\u56FE ${++count}\uFF1A${n.name}` });
-        try {
-          const bytes = await n.exportAsync(setting);
+        jobs.push({ setting, j, index: cutoutCount++ });
+      }
+      groups.push({
+        data,
+        n,
+        plan,
+        jobs,
+        weight: Math.max(...jobs.map((job) => cutoutWeight(n, job.setting)))
+      });
+    }
+    const outcomes = new Array(cutoutCount);
+    await settleAll(
+      groups.map(
+        (group) => limitExport(group.weight, async () => {
           check();
-          const format = setting.format.toLowerCase(), path = `assets/${prefix}-${safeId(n.id)}-${j}.${format}`;
-          const rb = n.absoluteRenderBounds || n.absoluteBoundingBox;
-          let scale = 1;
-          if (setting.constraint) {
-            const c = setting.constraint;
-            const area = setting.useAbsoluteBounds ? n.absoluteBoundingBox : rb;
-            scale = c.type === "SCALE" ? c.value : c.value / (c.type === "WIDTH" ? area.width : area.height);
-          }
-          const a = {
-            id: n.id + "-" + j,
-            name: n.name,
-            width: n.width,
-            height: n.height,
-            format,
-            frameId: data.frameId,
-            regionId: data.regionId,
-            path,
-            bytes: bytes.length,
-            nodeIds: [n.id],
-            uses: [
-              {
-                nodeId: n.id,
+          const { data, n, plan } = group;
+          for (const job of group.jobs) {
+            check();
+            const { setting, j, index } = job;
+            post("progress", { message: `\u5207\u56FE ${index + 1}/${cutoutCount}\uFF1A${n.name}` });
+            try {
+              const bytes = await n.exportAsync(setting);
+              check();
+              const format = setting.format.toLowerCase(), path = `assets/${prefix}-${safeId(n.id)}-${j}.${format}`;
+              const rb = n.absoluteRenderBounds || n.absoluteBoundingBox;
+              let scale = 1;
+              if (setting.constraint) {
+                const c = setting.constraint;
+                const area = setting.useAbsoluteBounds ? n.absoluteBoundingBox : rb;
+                scale = c.type === "SCALE" ? c.value : c.value / (c.type === "WIDTH" ? area.width : area.height);
+              }
+              const asset = {
+                id: n.id + "-" + j,
                 name: n.name,
+                width: n.width,
+                height: n.height,
+                format,
                 frameId: data.frameId,
                 regionId: data.regionId,
-                width: n.width,
-                height: n.height
-              }
-            ],
-            scale,
-            scaleLabel: format === "svg" ? "\u77E2\u91CF" : Math.round(scale * 100) / 100 + "\xD7",
-            exportSettings: clean(setting)
-          };
-          if (format === "png") Object.assign(a, pngSize(bytes));
-          post("file", { path, bytes });
-          assets.push(a);
-        } catch (e) {
-          if (cancelled) throw e;
-          const frame = natives.get(data.frameId), region = natives.get(data.regionId), page = pageOf(n), nodePath = [];
-          for (let parent = n; parent && parent.type !== "PAGE"; parent = parent.parent)
-            nodePath.unshift({ id: parent.id, name: parent.name });
-          const failure = {
-            nodeId: n.id,
-            nodeName: n.name,
-            pageId: page.id,
-            pageName: page.name,
-            regionId: data.regionId,
-            regionName: region?.name || data.regionId,
-            frameId: data.frameId,
-            frameName: frame?.name || data.frameId,
-            nodePath,
-            format: setting.format,
-            exportSettings: clean(setting),
-            source: plan.source,
-            message: errorText(e)
-          };
-          assetFailures.push(failure);
-          const message = "\u5207\u56FE\u5BFC\u51FA\u5931\u8D25\uFF1A" + page.name + " / " + failure.frameName + "\uFF08" + data.frameId + "\uFF09 / " + n.name + "\uFF08" + n.id + "\uFF09 [" + setting.format + "] " + failure.message;
-          post("asset-warning", { message, failure });
-        }
-      }
+                path,
+                bytes: bytes.length,
+                nodeIds: [n.id],
+                uses: [
+                  {
+                    nodeId: n.id,
+                    name: n.name,
+                    frameId: data.frameId,
+                    regionId: data.regionId,
+                    width: n.width,
+                    height: n.height
+                  }
+                ],
+                scale,
+                scaleLabel: format === "svg" ? "\u77E2\u91CF" : Math.round(scale * 100) / 100 + "\xD7",
+                exportSettings: clean(setting)
+              };
+              if (format === "png") Object.assign(asset, pngSize(bytes));
+              post("file", { path, bytes });
+              outcomes[index] = asset;
+            } catch (e) {
+              if (cancelled) throw e;
+              const frame = natives.get(data.frameId), region = natives.get(data.regionId), page = pageOf(n), nodePath = [];
+              for (let parent = n; parent && parent.type !== "PAGE"; parent = parent.parent)
+                nodePath.unshift({ id: parent.id, name: parent.name });
+              const failure = {
+                nodeId: n.id,
+                nodeName: n.name,
+                pageId: page.id,
+                pageName: page.name,
+                regionId: data.regionId,
+                regionName: region?.name || data.regionId,
+                frameId: data.frameId,
+                frameName: frame?.name || data.frameId,
+                nodePath,
+                format: setting.format,
+                exportSettings: clean(setting),
+                source: plan.source,
+                message: errorText(e)
+              };
+              const message = "\u5207\u56FE\u5BFC\u51FA\u5931\u8D25\uFF1A" + page.name + " / " + failure.frameName + "\uFF08" + data.frameId + "\uFF09 / " + n.name + "\uFF08" + n.id + "\uFF09 [" + setting.format + "] " + failure.message;
+              outcomes[index] = { failure, message };
+            }
+          }
+        })
+      )
+    );
+    for (const outcome of outcomes) {
+      if (!outcome) continue;
+      if (outcome.failure) {
+        assetFailures.push(outcome.failure);
+        post("asset-warning", { message: outcome.message, failure: outcome.failure });
+      } else assets.push(outcome);
     }
     check();
     const cssRecords = /* @__PURE__ */ new Map(), cssFailures = [], colorRecords = /* @__PURE__ */ new Map(), colorCache = /* @__PURE__ */ new Map();

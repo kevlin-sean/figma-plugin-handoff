@@ -48,3 +48,14 @@ test('mixed corner radii retain explicit zero corners without attempting to conv
 test('default preview density is 2x for a 1440 by 900 Frame, independent of asset Export settings',async()=>{
  const h=setup(),frame=add(h.section,'desktop','FRAME',0,0,1440,900);const {done,error}=await h.run({previewScale:undefined});assert.ok(done,error?.message);const tile=done.previews[0].tiles[0];assert.equal(tile.scale,2);assert.equal(tile.pixelWidth,2880);assert.equal(tile.pixelHeight,1800);assert.equal(done.assets.length,0);assert.equal(frame.calls[0].constraint.value,2);
 });
+
+test('large Section rasters four previews at once and still paints tiles in document order',async()=>{
+ const h=setup();let current=0,peak=0;const pending=[];
+ for(let i=0;i<6;i++){const n=add(h.section,'tile-'+i,'FRAME',i*100,0,80,80);n.exportAsync=async opts=>{current++;peak=Math.max(peak,current);await new Promise(resolve=>pending.push(resolve));current--;const r=opts.useAbsoluteBounds?n.absoluteBoundingBox:n.absoluteRenderBounds;return png(r.width*opts.constraint.value,r.height*opts.constraint.value)};}
+ let finished=false;const job=h.run().then(result=>{finished=true;return result});
+ let sawFull=false;
+ for(let turn=0;turn<40&&!finished;turn++){await new Promise(resolve=>setTimeout(resolve,0));if(pending.length>=4)sawFull=true;while(pending.length)pending.pop()();}
+ const {done,error,svg}=await job;assert.ok(done,error?.message);assert.ok(sawFull);assert.equal(peak,4);
+ assert.deepEqual(Array.from(done.previews[0].tiles,t=>t.nodeId),['tile-0','tile-1','tile-2','tile-3','tile-4','tile-5']);
+ let cursor=-1;for(let i=0;i<6;i++){const at=svg.indexOf('x="'+(2000+i*100)+'"');assert.ok(at>cursor);cursor=at;}
+});

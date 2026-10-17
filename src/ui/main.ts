@@ -56,6 +56,8 @@ function lock(value) {
   $('export').disabled = value;
   $('cancel').hidden = !value;
   $('refreshSelection').disabled = value;
+  $('checkPages').disabled = value;
+  $('clearPages').disabled = value;
 }
 function hideDownload() {
   if (downloadUrl) URL.revokeObjectURL(downloadUrl);
@@ -75,8 +77,21 @@ function scopeInfo() {
     const matches = state.selection.filter((n) => ids.has(n.id));
     $('scopeInfo').textContent =
       `旧包匹配 ${matches.length}/${state.selection.length} 个目标。请选择互不包含的 Frame / Section。`;
+  } else if (mode() !== 'update' && scope() === 'pages') {
+    const labels = [...$('pages').children];
+    const count = labels.filter((label) => label.children[0]?.checked).length;
+    $('scopeInfo').textContent = labels.length ? `已选 ${count} / ${labels.length} 个 Page` : '';
   } else $('scopeInfo').textContent = '';
 }
+function pageChecks() {
+  return [...$('pages').children].map((label) => label.children[0]).filter(Boolean);
+}
+function setAllPages(checked) {
+  for (const input of pageChecks()) input.checked = checked;
+  scopeInfo();
+}
+$('checkPages').onclick = () => setAllPages(true);
+$('clearPages').onclick = () => setAllPages(false);
 function modes() {
   const update = mode() === 'update';
   $('oldPanel').hidden = !update;
@@ -504,20 +519,31 @@ window.onmessage = async (event) => {
     if (!Array.isArray(m.pages) || !Array.isArray(m.selection)) return;
     const first = !state.pages.length,
       known = new Set(state.pages.map((p) => p.id)),
-      checked = new Set(
-        [...document.querySelectorAll('#pages input:checked')].map((el) => el.value),
-      );
+      inputs = pageChecks(),
+      checked = new Set(inputs.filter((el) => el.checked).map((el) => el.value)),
+      same =
+        inputs.length === m.pages.length && m.pages.every((p, i) => inputs[i].value === p.id);
     state = m;
-    $('pages').replaceChildren();
-    for (const p of m.pages) {
-      const label = document.createElement('label'),
-        input = document.createElement('input');
-      input.type = 'checkbox';
-      input.value = p.id;
-      input.checked = first ? p.id === m.currentPage : known.has(p.id) && checked.has(p.id);
-      input.disabled = working;
-      label.append(input, document.createTextNode(p.name));
-      $('pages').append(label);
+    // Keep the existing boxes when the page list is unchanged. Rebuilding them
+    // on focus or selection refresh drops the click that was trying to uncheck.
+    if (same) {
+      m.pages.forEach((p, i) => {
+        inputs[i].disabled = working;
+        if (inputs[i].nextSibling) inputs[i].nextSibling.textContent = p.name;
+      });
+    } else {
+      $('pages').replaceChildren();
+      for (const p of m.pages) {
+        const label = document.createElement('label'),
+          input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = p.id;
+        input.checked = first ? p.id === m.currentPage : known.has(p.id) && checked.has(p.id);
+        input.disabled = working;
+        input.onchange = scopeInfo;
+        label.append(input, document.createTextNode(p.name));
+        $('pages').append(label);
+      }
     }
     scopeInfo();
     namePreview();
