@@ -656,12 +656,68 @@ function preferredAsset(context) {
     ? chosen
     : context.items.find((a) => a.format.toLowerCase() === 'svg') || context.items[0];
 }
+// file:// pages cannot read sibling images with fetch, and Chrome ignores
+// <a download> for those URLs, so a normal click would preview the file.
+// The package stores the original bytes in a sibling script; a blob URL
+// then downloads them under the layer file name.
+const downloadBytes = new Map();
+function rememberDownload(path, b64) {
+  downloadBytes.set(path, b64);
+}
+function mimeFor(path) {
+  const format = String(path).split('.').pop().toLowerCase();
+  if (format === 'svg') return 'image/svg+xml';
+  if (format === 'png') return 'image/png';
+  if (format === 'webp') return 'image/webp';
+  return 'application/octet-stream';
+}
+function decodeBase64(b64) {
+  const binary = atob(b64),
+    bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+function saveBytes(bytes, filename, type) {
+  const url = URL.createObjectURL(new Blob([bytes], { type })),
+    a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function startDownload(path, filename) {
+  const finish = (b64) => {
+    saveBytes(decodeBase64(b64), filename, mimeFor(path));
+    toast('已开始下载');
+  };
+  if (downloadBytes.has(path)) {
+    try {
+      finish(downloadBytes.get(path));
+    } catch {
+      toast('下载失败');
+    }
+    return;
+  }
+  const s = document.createElement('script');
+  s.src = path + '.dl.js';
+  s.onload = () => {
+    if (!downloadBytes.has(path)) {
+      toast('下载失败');
+      return;
+    }
+    try {
+      finish(downloadBytes.get(path));
+    } catch {
+      toast('下载失败');
+    }
+  };
+  s.onerror = () => toast('无法下载，请用当前插件重新导出');
+  (document.head || document.documentElement).append(s);
+}
 function saveLink(path, filename, label, extraClass = '') {
-  const blank =
-    typeof location !== 'undefined' && location.protocol === 'file:'
-      ? ' target="_blank" rel="noopener"'
-      : '';
-  return `<a class="export-save${extraClass ? ' ' + extraClass : ''}" href="${esc(path)}" download="${esc(filename)}"${blank}>${esc(label)}</a>`;
+  return `<button type="button" class="export-save${extraClass ? ' ' + extraClass : ''}" data-save-path="${esc(path)}" data-save-name="${esc(filename)}">${esc(label)}</button>`;
 }
 function exportMeta(a) {
   const format = String(a.format || '').toUpperCase(),
@@ -691,7 +747,7 @@ function exportPanel(n) {
         'Export ' + String(active.format || '').toUpperCase(),
         'export-action',
       ) +
-      '<p class="export-hint">点击 Export 保存当前格式。离线打开若只是预览，请按住 Option / Alt 再点一次。</p>',
+      '<p class="export-hint">点击 Export 直接下载当前格式的原文件。</p>',
     'asset-export-section',
   );
 }
@@ -1437,7 +1493,12 @@ $('navigation').addEventListener('keydown', (e) => {
   }
 });
 function handleExportClick(e) {
-  if (e.target.closest('.export-action')) return;
+  const save = e.target.closest('[data-save-path]');
+  if (save) {
+    e.preventDefault();
+    startDownload(save.dataset.savePath, save.dataset.saveName);
+    return;
+  }
   const file = e.target.closest('[data-export-asset]');
   if (!file) return;
   const context = exportContext(byId.get(selected)),
@@ -1524,6 +1585,11 @@ document.querySelectorAll('[data-filter]').forEach(
     }),
 );
 $('assetList').addEventListener('click', (e) => {
+  const save = e.target.closest('[data-save-path]');
+  if (save) {
+    startDownload(save.dataset.savePath, save.dataset.saveName);
+    return;
+  }
   const b = e.target.closest('[data-locate]');
   if (b) locateNode(b.dataset.locate);
 });

@@ -495,9 +495,62 @@ function preferredAsset(context) {
   const chosen = exportChoice?.ownerId === context.owner.id ? assets[exportChoice.index] : null;
   return context.items.includes(chosen) ? chosen : context.items.find((a) => a.format.toLowerCase() === "svg") || context.items[0];
 }
+const downloadBytes = /* @__PURE__ */ new Map();
+function rememberDownload(path, b64) {
+  downloadBytes.set(path, b64);
+}
+function mimeFor(path) {
+  const format = String(path).split(".").pop().toLowerCase();
+  if (format === "svg") return "image/svg+xml";
+  if (format === "png") return "image/png";
+  if (format === "webp") return "image/webp";
+  return "application/octet-stream";
+}
+function decodeBase64(b64) {
+  const binary = atob(b64), bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+function saveBytes(bytes, filename, type) {
+  const url = URL.createObjectURL(new Blob([bytes], { type })), a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1e3);
+}
+function startDownload(path, filename) {
+  const finish = (b64) => {
+    saveBytes(decodeBase64(b64), filename, mimeFor(path));
+    toast("\u5DF2\u5F00\u59CB\u4E0B\u8F7D");
+  };
+  if (downloadBytes.has(path)) {
+    try {
+      finish(downloadBytes.get(path));
+    } catch {
+      toast("\u4E0B\u8F7D\u5931\u8D25");
+    }
+    return;
+  }
+  const s = document.createElement("script");
+  s.src = path + ".dl.js";
+  s.onload = () => {
+    if (!downloadBytes.has(path)) {
+      toast("\u4E0B\u8F7D\u5931\u8D25");
+      return;
+    }
+    try {
+      finish(downloadBytes.get(path));
+    } catch {
+      toast("\u4E0B\u8F7D\u5931\u8D25");
+    }
+  };
+  s.onerror = () => toast("\u65E0\u6CD5\u4E0B\u8F7D\uFF0C\u8BF7\u7528\u5F53\u524D\u63D2\u4EF6\u91CD\u65B0\u5BFC\u51FA");
+  (document.head || document.documentElement).append(s);
+}
 function saveLink(path, filename, label, extraClass = "") {
-  const blank = typeof location !== "undefined" && location.protocol === "file:" ? ' target="_blank" rel="noopener"' : "";
-  return `<a class="export-save${extraClass ? " " + extraClass : ""}" href="${esc(path)}" download="${esc(filename)}"${blank}>${esc(label)}</a>`;
+  return `<button type="button" class="export-save${extraClass ? " " + extraClass : ""}" data-save-path="${esc(path)}" data-save-name="${esc(filename)}">${esc(label)}</button>`;
 }
 function exportMeta(a) {
   const format = String(a.format || "").toUpperCase(), size = a.pixelWidth ? `${a.pixelWidth} \xD7 ${a.pixelHeight} px` : `${num(a.width)} \xD7 ${num(a.height)}`;
@@ -518,7 +571,7 @@ function exportPanel(n) {
       filename,
       "Export " + String(active.format || "").toUpperCase(),
       "export-action"
-    ) + '<p class="export-hint">\u70B9\u51FB Export \u4FDD\u5B58\u5F53\u524D\u683C\u5F0F\u3002\u79BB\u7EBF\u6253\u5F00\u82E5\u53EA\u662F\u9884\u89C8\uFF0C\u8BF7\u6309\u4F4F Option / Alt \u518D\u70B9\u4E00\u6B21\u3002</p>',
+    ) + '<p class="export-hint">\u70B9\u51FB Export \u76F4\u63A5\u4E0B\u8F7D\u5F53\u524D\u683C\u5F0F\u7684\u539F\u6587\u4EF6\u3002</p>',
     "asset-export-section"
   );
 }
@@ -1055,7 +1108,12 @@ $("navigation").addEventListener("keydown", (e) => {
   }
 });
 function handleExportClick(e) {
-  if (e.target.closest(".export-action")) return;
+  const save = e.target.closest("[data-save-path]");
+  if (save) {
+    e.preventDefault();
+    startDownload(save.dataset.savePath, save.dataset.saveName);
+    return;
+  }
   const file = e.target.closest("[data-export-asset]");
   if (!file) return;
   const context = exportContext(byId.get(selected)), index = Number(file.dataset.exportAsset), asset = assets[index];
@@ -1137,6 +1195,11 @@ document.querySelectorAll("[data-filter]").forEach(
   }
 );
 $("assetList").addEventListener("click", (e) => {
+  const save = e.target.closest("[data-save-path]");
+  if (save) {
+    startDownload(save.dataset.savePath, save.dataset.saveName);
+    return;
+  }
   const b = e.target.closest("[data-locate]");
   if (b) locateNode(b.dataset.locate);
 });

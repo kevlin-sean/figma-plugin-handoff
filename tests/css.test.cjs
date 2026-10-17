@@ -7,7 +7,7 @@ class Element{
 function viewer(fixture){
  const downloads=[],bodyChildren=[],events={},elements=new Map(),document={body:{append(el){bodyChildren.push(el)}},createElement(tag){const el=new Element();el.tagName=tag.toUpperCase();el.click=()=>downloads.push({href:el.href,filename:el.download});el.remove=()=>{const at=bodyChildren.indexOf(el);if(at>=0)bodyChildren.splice(at,1)};return el;},getElementById(id){if(!elements.has(id))elements.set(id,new Element());return elements.get(id)},querySelector(){return new Element()},querySelectorAll(){return[]},addEventListener(k,fn){events[k]=fn}};
  const n={id:'a',name:'Board',type:'FRAME',depth:0,regionId:'a',frameId:'a',pageId:'p',width:300,height:300,visible:true,absoluteBoundingBox:{x:0,y:0,width:300,height:300},absoluteTransform:[[1,0,0],[0,1,0]],fills:[]};
- const c={document,window:{HANDOFF:fixture||{pages:[{id:'p',name:'P1',regions:['a']}],nodes:[n],assets:[],previews:[{id:'a',path:'preview.png',pixelWidth:300,pixelHeight:300,scale:1}],navigation:['a']},addEventListener(){}},navigator:{},console,setTimeout,clearTimeout};vm.createContext(c);
+ const c={document,window:{HANDOFF:fixture||{pages:[{id:'p',name:'P1',regions:['a']}],nodes:[n],assets:[],previews:[{id:'a',path:'preview.png',pixelWidth:300,pixelHeight:300,scale:1}],navigation:['a']},addEventListener(){}},navigator:{},console,setTimeout,clearTimeout,Blob,atob,btoa,URL:{createObjectURL(){return 'blob:asset'},revokeObjectURL(){}}};vm.createContext(c);
  for(const file of ['spacing.js','viewer.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),c);
  return{run:s=>vm.runInContext(s,c),c,elements,downloads,bodyChildren,events};
 }
@@ -84,11 +84,16 @@ function exportFixture(){
 }
 test('export panel shows downloadable real formats near properties and uses the nearest asset owner',()=>{
  const fixture=exportFixture(),before=JSON.stringify(fixture),{run,elements}=viewer(fixture);run("select('path')");assert.equal(run("exportContext(byId.get('path')).owner.id"),'c');const html=elements.get('exportDock').innerHTML;
- assert.equal(elements.get('exportDock').hidden,false);assert.doesNotMatch(elements.get('inspectPanel').innerHTML,/asset-export-section/);assert.doesNotMatch(html,/所属导出图层/);assert.match(html,/>Export</);assert.match(html,/任务图标\.svg/);assert.match(html,/任务图标\.png/);assert.match(html,/48 × 48 px/);assert.match(html,/class="export-save export-action"/);assert.match(html,/download="任务图标\.svg"/);assert.match(html,/Export SVG/);assert.match(html,/Option \/ Alt/);
+ assert.equal(elements.get('exportDock').hidden,false);assert.doesNotMatch(elements.get('inspectPanel').innerHTML,/asset-export-section/);assert.doesNotMatch(html,/所属导出图层/);assert.match(html,/>Export</);assert.match(html,/任务图标\.svg/);assert.match(html,/任务图标\.png/);assert.match(html,/48 × 48 px/);assert.match(html,/class="export-save export-action"/);assert.match(html,/data-save-path="assets\/shared\.svg"/);assert.match(html,/data-save-name="任务图标\.svg"/);assert.match(html,/Export SVG/);assert.match(html,/直接下载/);assert.doesNotMatch(html,/target="_blank"|Option \/ Alt/);
  assert.equal(run("canvasExportSelection(['path','c','a'])"),'c');assert.equal(run("exportContext(byId.get('other')).items.length"),0);assert.equal(JSON.stringify(fixture),before);
 });
 test('a whole-board export remains downloadable without swallowing ordinary child inspection',()=>{
  const fixture=exportFixture();fixture.assets=[{id:'board',name:'board',format:'png',path:'assets/board.png',nodeIds:['a']}];const{run}=viewer(fixture);assert.equal(run("canvasExportSelection(['path','c','a'])"),'path');assert.equal(run("exportContext(byId.get('path')).owner.id"),'a');
+});
+test('export button saves original bytes instead of opening a preview',()=>{
+ const fixture=exportFixture(),{run,elements,downloads}=viewer(fixture);run("select('c');rememberDownload('assets/shared.svg', btoa('<svg/>'))");let prevented=0;
+ elements.get('exportDock').handlers.click({target:{closest:selector=>selector==='[data-save-path]'?{dataset:{savePath:'assets/shared.svg',saveName:'任务图标.svg'}}:null},preventDefault(){prevented++}});
+ assert.equal(prevented,1);assert.equal(downloads.length,1);assert.equal(downloads[0].filename,'任务图标.svg');assert.equal(downloads[0].href,'blob:asset');
 });
 test('normal file-card click chooses a format; Alt-click preserves the native browser save action',()=>{
  const fixture=exportFixture(),{run,elements,downloads}=viewer(fixture);run("select('c')");let prevented=0;
