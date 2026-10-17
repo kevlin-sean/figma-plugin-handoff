@@ -656,6 +656,20 @@ function preferredAsset(context) {
     ? chosen
     : context.items.find((a) => a.format.toLowerCase() === 'svg') || context.items[0];
 }
+function saveLink(path, filename, label, extraClass = '') {
+  const blank =
+    typeof location !== 'undefined' && location.protocol === 'file:'
+      ? ' target="_blank" rel="noopener"'
+      : '';
+  return `<a class="export-save${extraClass ? ' ' + extraClass : ''}" href="${esc(path)}" download="${esc(filename)}"${blank}>${esc(label)}</a>`;
+}
+function exportMeta(a) {
+  const format = String(a.format || '').toUpperCase(),
+    size = a.pixelWidth
+      ? `${a.pixelWidth} × ${a.pixelHeight} px`
+      : `${num(a.width)} × ${num(a.height)}`;
+  return format + ' · ' + (a.scaleLabel || '矢量') + ' · ' + size;
+}
 function exportPanel(n) {
   const context = exportContext(n);
   if (!context.items.length) return '';
@@ -664,12 +678,20 @@ function exportPanel(n) {
       .map((a) => {
         const filename = assetFilename(a, context.owner),
           index = assetIndexes.get(a);
-        return `<a class="export-file ${a === active ? 'active' : ''}" data-export-asset="${index}" href="${esc(a.path)}" download="${esc(filename)}" ${a === active ? 'aria-current="true"' : ''} title="${esc(filename)} · ${esc(a.scaleLabel || '矢量')} · ${a.pixelWidth ? `${a.pixelWidth} × ${a.pixelHeight}` : `${num(a.width)} × ${num(a.height)}`} px"><span class="export-preview"><img src="${esc(a.path)}" alt=""></span><span class="export-file-info"><strong>${esc(filename)}</strong></span></a>`;
+        return `<div class="export-file ${a === active ? 'active' : ''}"><a class="export-file-main" data-export-asset="${index}" href="${esc(a.path)}" download="${esc(filename)}" ${a === active ? 'aria-current="true"' : ''} title="${esc(filename)}"><span class="export-preview"><img src="${esc(a.path)}" alt=""></span><span class="export-file-info"><strong>${esc(filename)}</strong><small>${esc(exportMeta(a))}</small></span></a></div>`;
       })
       .join('');
+  const filename = assetFilename(active, context.owner);
   return refSection(
-    '导出',
-    body + '<p class="export-hint">按(option)或(alt)点击即可下载</p>',
+    'Export',
+    body +
+      saveLink(
+        active.path,
+        filename,
+        'Export ' + String(active.format || '').toUpperCase(),
+        'export-action',
+      ) +
+      '<p class="export-hint">点击 Export 保存当前格式。离线打开若只是预览，请按住 Option / Alt 再点一次。</p>',
     'asset-export-section',
   );
 }
@@ -1148,8 +1170,12 @@ function renderInspector() {
     bordersPanel(n) +
     fontsPanel(n) +
     shadowsPanel(n) +
-    cssPanel(n) +
-    exportPanel(n);
+    cssPanel(n);
+  const dock = $('exportDock');
+  if (dock) {
+    dock.innerHTML = exportPanel(n);
+    dock.hidden = !dock.innerHTML;
+  }
   $('unitLabel').textContent = unitLabels[displayUnit];
 }
 
@@ -1320,7 +1346,7 @@ function renderAssets() {
           a.nodeIds.find((id) => byId.get(id)?.frameId === f.id) ||
           a.nodeIds.find((id) => regions.some((r) => r.id === byId.get(id)?.regionId)) ||
           a.nodeIds[0];
-        return `<article class="asset-card ${a.nodeIds.includes(selected) ? 'active' : ''}"><button class="asset-preview" data-locate="${esc(id)}" aria-label="定位 ${esc(a.name)}"><img loading="lazy" src="${esc(a.path)}" alt=""></button><div class="asset-info"><strong>${esc(a.name)}</strong><p>${a.format.toUpperCase()} · ${num(a.width)} × ${num(a.height)} · ${esc(a.scaleLabel || '矢量')}</p>${a.pixelWidth ? `<p>文件 ${a.pixelWidth} × ${a.pixelHeight} px</p>` : ''}${a.nodeIds.length > 1 ? `<p>${a.nodeIds.length} 处共享</p>` : ''}<div class="asset-actions"><button data-locate="${esc(id)}">定位图层</button><a href="${esc(a.path)}" download="${esc(assetFilename(a, byId.get(id)))}">下载 ↓</a></div></div></article>`;
+        return `<article class="asset-card ${a.nodeIds.includes(selected) ? 'active' : ''}"><button class="asset-preview" data-locate="${esc(id)}" aria-label="定位 ${esc(a.name)}"><img loading="lazy" src="${esc(a.path)}" alt=""></button><div class="asset-info"><strong>${esc(a.name)}</strong><p>${a.format.toUpperCase()} · ${num(a.width)} × ${num(a.height)} · ${esc(a.scaleLabel || '矢量')}</p>${a.pixelWidth ? `<p>文件 ${a.pixelWidth} × ${a.pixelHeight} px</p>` : ''}${a.nodeIds.length > 1 ? `<p>${a.nodeIds.length} 处共享</p>` : ''}<div class="asset-actions"><button data-locate="${esc(id)}">定位图层</button>${saveLink(a.path, assetFilename(a, byId.get(id)), '下载')}</div></div></article>`;
       })
       .join('') || '<p class="empty">当前筛选没有独立切图。可切换范围或 SVG / PNG 格式查看。</p>';
 }
@@ -1410,33 +1436,35 @@ $('navigation').addEventListener('keydown', (e) => {
     scrollLayer(next, true);
   }
 });
-$('inspectPanel').addEventListener('click', (e) => {
+function handleExportClick(e) {
+  if (e.target.closest('.export-action')) return;
   const file = e.target.closest('[data-export-asset]');
-  if (file) {
-    const context = exportContext(byId.get(selected)),
-      index = Number(file.dataset.exportAsset),
-      asset = assets[index];
-    if (!context.items.includes(asset)) {
-      e.preventDefault();
-      return;
-    }
-    exportChoice = { ownerId: context.owner.id, index };
-    if (e.altKey && !e.ctrlKey && !e.metaKey) {
-      document.querySelectorAll('[data-export-asset]').forEach((link) => {
-        const active = Number(link.dataset.exportAsset) === index;
-        link.classList.toggle('active', active);
-        if (active) link.setAttribute('aria-current', 'true');
-        else link.removeAttribute('aria-current');
-      });
-      toast('已请求下载原文件');
-    } else {
-      e.preventDefault();
-      const top = $('inspectPanel').scrollTop;
-      renderInspector();
-      $('inspectPanel').scrollTop = top;
-    }
+  if (!file) return;
+  const context = exportContext(byId.get(selected)),
+    index = Number(file.dataset.exportAsset),
+    asset = assets[index];
+  if (!context.items.includes(asset)) {
+    e.preventDefault();
     return;
   }
+  exportChoice = { ownerId: context.owner.id, index };
+  if (e.altKey && !e.ctrlKey && !e.metaKey) {
+    document.querySelectorAll('[data-export-asset]').forEach((link) => {
+      const active = Number(link.dataset.exportAsset) === index;
+      link.classList.toggle('active', active);
+      if (active) link.setAttribute('aria-current', 'true');
+      else link.removeAttribute('aria-current');
+    });
+    toast('已请求下载原文件');
+  } else {
+    e.preventDefault();
+    const top = $('inspectPanel').scrollTop;
+    renderInspector();
+    $('inspectPanel').scrollTop = top;
+  }
+}
+$('exportDock').addEventListener('click', handleExportClick);
+$('inspectPanel').addEventListener('click', (e) => {
   const swatch = e.target.closest('[data-color-values]');
   if (swatch) {
     colorMode = (colorMode + 1) % 3;
@@ -1474,6 +1502,14 @@ $('pagesTab').onclick = () => setLibrary('pages');
 $('assetTab').onclick = () => setLibrary('asset');
 $('colorsTab').onclick = () => setLibrary('colors');
 $('assetCount').textContent = assets.length;
+const bundleLink = $('assetBundle');
+if (bundleLink) {
+  bundleLink.hidden = !D.assetBundle;
+  if (D.assetBundle) {
+    bundleLink.href = D.assetBundle;
+    bundleLink.download = '切图.zip';
+  }
+}
 $('assetScope').onchange = renderAssets;
 $('assetSearch').oninput = renderAssets;
 $('colorSearch').oninput = renderColors;

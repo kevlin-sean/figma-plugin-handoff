@@ -498,6 +498,13 @@ footer span {
   flex: 1;
   min-height: 0;
 }
+#exportDock {
+  flex: 0 0 auto;
+  max-height: 46%;
+  overflow: auto;
+  border-top: 1px solid #101113;
+  background: #1b1d1f;
+}
 
 .copy {
   font-size: 9px;
@@ -613,9 +620,22 @@ footer span {
   gap: 6px;
 }
 .asset-actions button, .asset-actions a {
-  font-size: 9px;
+  font-size: 11px;
   padding: 0;
-  color: #a3c3ed;
+  color: #d6e6ff;
+}
+.asset-bundle {
+  display: block;
+  margin-top: 8px;
+  padding: 7px 8px;
+  border-radius: 4px;
+  background: #3c5270;
+  color: #f4f7fb;
+  font-size: 11px;
+  text-align: center;
+}
+.asset-bundle:hover {
+  background: #4a6284;
 }
 .color-card {
   display: flex;
@@ -754,7 +774,7 @@ footer span {
 .export-file {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 13px 11px;
   margin: 10px 0 0;
   min-height: 72px;
@@ -763,6 +783,39 @@ footer span {
   border: 1px solid #ffffff0b;
   border-radius: 5px;
   outline-offset: 2px;
+}
+.export-file-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+}
+.export-save {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #3c5270;
+  color: #f4f7fb;
+  font-size: 11px;
+}
+.export-save:hover {
+  background: #4a6284;
+}
+.export-action {
+  display: block;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #0c8ce9;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 590;
+  text-align: center;
+}
+.export-action:hover {
+  background: #0b7ed4;
 }
 .export-file:hover {
   background: #2b3037;

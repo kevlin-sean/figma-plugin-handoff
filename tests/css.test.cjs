@@ -53,7 +53,7 @@ test('page color palette preserves semantic token identities and scopes used col
  const fixture=libraryFixture(),before=JSON.stringify(fixture),{run,c}=viewer(fixture);c.page='p';const list=run('paletteForPage(page)');assert.equal(list.filter(c=>c.source==='variable').length,1);assert.equal(list.find(c=>c.source==='variable').name,'品牌红');assert.equal(list.find(c=>c.source==='variable').variable.modeName,'明亮');assert.ok(list.some(c=>c.source==='color'&&c.color.r===1));assert.ok(!list.some(c=>c.color.g===1));assert.equal(run("paletteForPage('p2').length"),1);assert.equal(JSON.stringify(fixture),before);
 });
 test('left resource tabs preserve the right inspector and selection while page-scoped shared assets remain locatable',()=>{
- const fixture=libraryFixture(),{run,elements}=viewer(fixture);run("select('c');setLibrary('asset')");assert.equal(elements.get('assetPanel').hidden,false);assert.equal(elements.get('pagePanel').hidden,true);assert.equal(elements.get('inspectPanel').hidden,undefined);assert.equal(run('selected'),'c');assert.match(elements.get('assetList').innerHTML,/data-locate="c"/);assert.match(elements.get('assetList').innerHTML,/2 处共享/);
+ const fixture=libraryFixture(),{run,elements}=viewer(fixture);run("select('c');setLibrary('asset')");assert.equal(elements.get('assetPanel').hidden,false);assert.equal(elements.get('pagePanel').hidden,true);assert.equal(elements.get('inspectPanel').hidden,undefined);assert.equal(run('selected'),'c');assert.match(elements.get('assetList').innerHTML,/data-locate="c"/);assert.match(elements.get('assetList').innerHTML,/2 处共享/);assert.match(elements.get('assetList').innerHTML,/class="export-save"/);fixture.assetBundle='assets/resources.zip';const again=viewer(fixture);assert.equal(again.elements.get('assetBundle').hidden,false);assert.equal(again.elements.get('assetBundle').getAttribute?.('download')||again.elements.get('assetBundle').download,'切图.zip');assert.equal(again.elements.get('assetBundle').href,'assets/resources.zip');
  run("setLibrary('colors')");assert.equal(elements.get('colorPanel').hidden,false);assert.equal(elements.get('assetPanel').hidden,true);assert.match(elements.get('colorList').innerHTML,/品牌红/);assert.equal(run('selected'),'c');
 });
 test('MeaXure inspector keeps concise reference sections and native code without metadata clutter',()=>{
@@ -83,8 +83,8 @@ function exportFixture(){
  d.assets.push({id:'png',name:'shared-png',format:'png',path:'assets/shared.png',width:24,height:24,pixelWidth:48,pixelHeight:48,scale:2,scaleLabel:'2×',nodeIds:['c'],uses:[{nodeId:'c',name:'任务图标'}]});return d;
 }
 test('export panel shows downloadable real formats near properties and uses the nearest asset owner',()=>{
- const fixture=exportFixture(),before=JSON.stringify(fixture),{run,elements}=viewer(fixture);run("select('path')");assert.equal(run("exportContext(byId.get('path')).owner.id"),'c');const html=elements.get('inspectPanel').innerHTML;
- assert.doesNotMatch(html,/所属导出图层/);assert.match(html,/任务图标\.svg/);assert.match(html,/任务图标\.png/);assert.match(html,/48 × 48 px/);assert.match(html,/按\(option\)或\(alt\)点击即可下载/);assert(html.indexOf('asset-export-section')>html.indexOf('css-section'));
+ const fixture=exportFixture(),before=JSON.stringify(fixture),{run,elements}=viewer(fixture);run("select('path')");assert.equal(run("exportContext(byId.get('path')).owner.id"),'c');const html=elements.get('exportDock').innerHTML;
+ assert.equal(elements.get('exportDock').hidden,false);assert.doesNotMatch(elements.get('inspectPanel').innerHTML,/asset-export-section/);assert.doesNotMatch(html,/所属导出图层/);assert.match(html,/>Export</);assert.match(html,/任务图标\.svg/);assert.match(html,/任务图标\.png/);assert.match(html,/48 × 48 px/);assert.match(html,/class="export-save export-action"/);assert.match(html,/download="任务图标\.svg"/);assert.match(html,/Export SVG/);assert.match(html,/Option \/ Alt/);
  assert.equal(run("canvasExportSelection(['path','c','a'])"),'c');assert.equal(run("exportContext(byId.get('other')).items.length"),0);assert.equal(JSON.stringify(fixture),before);
 });
 test('a whole-board export remains downloadable without swallowing ordinary child inspection',()=>{
@@ -93,8 +93,8 @@ test('a whole-board export remains downloadable without swallowing ordinary chil
 test('normal file-card click chooses a format; Alt-click preserves the native browser save action',()=>{
  const fixture=exportFixture(),{run,elements,downloads}=viewer(fixture);run("select('c')");let prevented=0;
  const event={target:{closest:selector=>selector==='[data-export-asset]'?{dataset:{exportAsset:'1'}}:null},preventDefault(){prevented++}};
- elements.get('inspectPanel').handlers.click(event);assert.equal(prevented,1);assert.equal(run('preferredAsset(exportContext(byId.get(selected))).format'),'png');
- elements.get('inspectPanel').handlers.click({...event,altKey:true});assert.equal(prevented,1);assert.equal(downloads.length,0);assert.equal(run('exportChoice.ownerId'),'c');
+ elements.get('exportDock').handlers.click(event);assert.equal(prevented,1);assert.equal(run('preferredAsset(exportContext(byId.get(selected))).format'),'png');
+ elements.get('exportDock').handlers.click({...event,altKey:true});assert.equal(prevented,1);assert.equal(downloads.length,0);assert.equal(run('exportChoice.ownerId'),'c');
 });
 test('Alt+canvas click resolves an exported icon without cancelling the real link default action',()=>{
  const fixture=exportFixture(),{run,c,downloads}=viewer(fixture);let prevented=0;const region={dataset:{region:'a'},getBoundingClientRect:()=>({left:0,top:0})},link={dataset:{nativeDownload:'0'}};
