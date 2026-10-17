@@ -187,6 +187,14 @@ test('geometry changed during native CSS collection still rejects a mixed snapsh
  await h.$('export').onclick();await h.drain();assert.ok(!h.outgoing.some(m=>m.type==='complete'));assert.ok(h.outgoing.some(m=>m.type==='error'&&m.message.includes('发生变化')));
 });
 
+test('render bounds, subpixel geometry and font resolution during export are not design edits',async()=>{
+ const h=harness({initialSelection:true});await h.drain();
+ const text=frame('label',h.a,'TEXT');text.characters='标题';text.fontName=Symbol('unloaded');text.getStyledTextSegments=()=>[{characters:'标题',fontSize:14,fontName:{family:'Inter',style:'Regular'}}];
+ h.a.getCSSAsync=async()=>{h.a.absoluteRenderBounds={x:1,y:2,width:170,height:250};h.a.width+=8;h.a.absoluteBoundingBox={...h.a.absoluteBoundingBox,x:h.a.absoluteBoundingBox.x+1e-8};text.fontName={family:'Inter',style:'Regular'};text.width+=20;return {width:'160px'}};
+ text.getCSSAsync=async()=>({font:'14px Inter'});
+ await h.$('export').onclick();await h.drain();const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);assert.equal(done.design.nodes.find(n=>n.id==='label').characters,'标题');
+});
+
 test('used color variables/styles retain names and per-node modes with cached lookups, without changing Figma',async()=>{
  const h=harness({initialSelection:true});await h.drain();const other=frame('dark-child',h.a,'RECTANGLE');
  for(const n of [h.a,other]){n.fillStyleId='s1';n.resolvedVariableModes={collection:n===h.a?'light':'dark'};n.fills=[{type:'SOLID',color:{r:n===h.a?1:0,g:0,b:0},boundVariables:{color:{type:'VARIABLE_ALIAS',id:'v1'}}}];}

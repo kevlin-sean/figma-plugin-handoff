@@ -85,6 +85,46 @@ const fields = [
 function clean(v) {
   return JSON.parse(JSON.stringify(v, (k, x) => (typeof x === 'symbol' ? 'MIXED' : x)));
 }
+const derivedGeometry = new Set([
+  'x',
+  'y',
+  'width',
+  'height',
+  'rotation',
+  'absoluteBoundingBox',
+  'absoluteTransform',
+  'absoluteRenderBounds',
+]);
+function sameValue(a, b) {
+  if (a === b || a === 'MIXED' || b === 'MIXED') return true;
+  if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) < 1e-4;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, index) => sameValue(item, b[index]));
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const key of keys) if (!sameValue(a[key], b[key])) return false;
+    return true;
+  }
+  return false;
+}
+function designEdited(before, after) {
+  if (before.length !== after.length) return true;
+  for (let i = 0; i < before.length; i++) {
+    const left = before[i],
+      right = after[i];
+    if (left.id !== right.id) return true;
+    const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+    for (const key of keys) {
+      if (derivedGeometry.has(key)) continue;
+      // Font loading during getCSSAsync drops the mixed-style segment list.
+      if (key === 'textSegments' && (left[key] === undefined || right[key] === undefined)) continue;
+      if (!sameValue(left[key], right[key])) return true;
+    }
+  }
+  return false;
+}
 function post(type, data) {
   figma.ui.postMessage(Object.assign({ type, runId, channel: bridgeChannel }, data || {}));
 }
@@ -799,11 +839,13 @@ async function collect(options) {
   }
   check();
   // Re-read only the collected roots. Editing while exporting must not produce a mixed snapshot.
+  // exportAsync and getCSSAsync refresh render bounds, sub-pixel geometry and unloaded
+  // fonts without any user edit; those derived fields are not design changes.
   const endNodes = [],
     endNative = new Map();
   for (const root of roots)
     serialize(root, pageOf(root).id, screenRoots(root), endNodes, endNative);
-  if (initialNodes !== JSON.stringify(endNodes))
+  if (designEdited(nodes, endNodes))
     throw Error('导出过程中设计稿发生变化，请停止编辑后重新导出。');
   for (const item of nodes) if (cssRecords.has(item.id)) item.figmaCSS = cssRecords.get(item.id);
   for (const item of nodes)
