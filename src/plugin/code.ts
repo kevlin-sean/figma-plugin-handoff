@@ -226,6 +226,106 @@ function candidateSettings(n) {
     })
     .map((s) => clean(s));
 }
+const iconShapes = new Set([
+  'VECTOR',
+  'STAR',
+  'LINE',
+  'ELLIPSE',
+  'POLYGON',
+  'BOOLEAN_OPERATION',
+  'REGULAR_POLYGON',
+]);
+const iconContainers = new Set(['GROUP', 'FRAME', 'COMPONENT', 'INSTANCE', 'BOOLEAN_OPERATION']);
+let iconMemo = new Map();
+function namedIcon(n) {
+  return /图标|(^|[^a-z0-9])(icons?|ico?)([^a-z0-9]|$)|icons?$/i.test(String(n?.name || ''));
+}
+function paintList(n, key) {
+  const list = n[key];
+  return Array.isArray(list) ? list : [];
+}
+function hasImagePaint(n) {
+  return ['fills', 'strokes'].some((key) =>
+    paintList(n, key).some((p) => p && p.visible !== false && p.type === 'IMAGE'),
+  );
+}
+function withinIconSize(n) {
+  const w = n.width,
+    h = n.height;
+  if (!(typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0)) return false;
+  const long = Math.max(w, h),
+    short = Math.min(w, h);
+  if (long / short > 3) return false;
+  const cap = n.type === 'COMPONENT' || n.type === 'INSTANCE' || namedIcon(n) ? 96 : 64;
+  return long <= cap + 0.5;
+}
+function graphicTree(n) {
+  if (n.visible === false) return true;
+  if (n.type === 'TEXT' || n.type === 'SLICE' || hasImagePaint(n)) return false;
+  const kids = n.children || [];
+  if (iconShapes.has(n.type) || n.type === 'RECTANGLE') return kids.every(graphicTree);
+  if (iconContainers.has(n.type))
+    return kids.some((c) => c.visible !== false) && kids.every(graphicTree);
+  return false;
+}
+function hasDrawing(n) {
+  if (n.visible === false) return false;
+  if (iconShapes.has(n.type)) return true;
+  return (n.children || []).some(hasDrawing);
+}
+function boxesOverlap(a, b) {
+  const A = a.absoluteBoundingBox,
+    B = b.absoluteBoundingBox;
+  if (!validBox(A) || !validBox(B)) return false;
+  return (
+    A.x < B.x + B.width - 0.5 &&
+    B.x < A.x + A.width - 0.5 &&
+    A.y < B.y + B.height - 0.5 &&
+    B.y < A.y + A.height - 0.5
+  );
+}
+function isIllustrationFragment(n) {
+  // Overlapping paths inside a large graphic are illustration detail, not icons.
+  if (!iconShapes.has(n.type) || (n.children || []).some((c) => c.visible !== false)) return false;
+  const p = n.parent;
+  if (!p || p.type === 'PAGE' || p.type === 'COMPONENT' || p.type === 'INSTANCE') return false;
+  if (namedIcon(n) || namedIcon(p) || Math.max(p.width || 0, p.height || 0) <= 96) return false;
+  const leaves = (p.children || []).filter(
+    (c) =>
+      c.visible !== false &&
+      iconShapes.has(c.type) &&
+      !(c.children || []).some((k) => k.visible !== false),
+  );
+  if (leaves.length < 4) return false;
+  let overlaps = 0;
+  for (const other of leaves) if (other !== n && boxesOverlap(n, other) && ++overlaps >= 2) return true;
+  return false;
+}
+function isAutoIcon(n) {
+  if (!n?.id) return false;
+  if (iconMemo.has(n.id)) return iconMemo.get(n.id);
+  iconMemo.set(n.id, false);
+  const ok =
+    n.visible !== false &&
+    n.opacity !== 0 &&
+    !n.isMask &&
+    n.type !== 'COMPONENT_SET' &&
+    n.type !== 'SECTION' &&
+    withinIconSize(n) &&
+    graphicTree(n) &&
+    (hasDrawing(n) || namedIcon(n)) &&
+    !isIllustrationFragment(n);
+  iconMemo.set(n.id, ok);
+  return ok;
+}
+function exportPlan(n) {
+  const explicit = candidateSettings(n);
+  if (explicit.length) return { settings: explicit, source: 'configured' };
+  if (!isAutoIcon(n)) return null;
+  for (let p = n.parent; p && p.type !== 'PAGE'; p = p.parent)
+    if (candidateSettings(p).length || isAutoIcon(p)) return null;
+  return { settings: [{ format: 'SVG' }], source: 'auto' };
+}
 // Section PNG exports can include Figma-specific margins and can downscale a whole
 // canvas. Compose independent raster previews in a self-contained SVG instead.
 // No clones, temporary pages or mutations of the source document are needed.
@@ -561,14 +661,16 @@ async function collect(options) {
     post('progress', { message: `设计稿 ${i + 1}/${roots.length}：${n.name}` });
     previews.push(await exportPreview(n, Number(options.previewScale) || 2, prefix, warnings));
   }
-  // Assets must be explicitly marked for SVG / PNG export in Figma.
+  // Explicit SVG/PNG exports, plus icon-sized graphics that were never marked.
   let count = 0;
+  iconMemo = new Map();
   for (const data of nodes) {
     check();
     const n = natives.get(data.id);
     if (!data.visible || data.opacity === 0 || data.width <= 0 || data.height <= 0) continue;
-    const settings = candidateSettings(n);
-    if (!settings.length) continue;
+    const plan = exportPlan(n);
+    if (!plan) continue;
+    const settings = plan.settings;
     for (let j = 0; j < settings.length; j++) {
       check();
       const setting = Object.assign({}, settings[j]);
@@ -638,7 +740,7 @@ async function collect(options) {
           nodePath,
           format: setting.format,
           exportSettings: clean(setting),
-          source: 'configured',
+          source: plan.source,
           message: errorText(e),
         };
         assetFailures.push(failure);

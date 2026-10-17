@@ -98,18 +98,34 @@ test('configured images and containers keep their own Export formats and PNG siz
   await h.$('export').onclick();await h.drain();const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);assert.equal(done.assets.length,2);assert.equal(done.assetFailures.length,0);const png=done.assets.find(a=>a.format==='png');assert.equal(png.scale,1);assert.equal(png.pixelWidth,24);assert.equal(png.nodeIds[0],photo.id);assert.equal(done.assets.find(a=>a.format==='svg').nodeIds[0],group.id);
 });
 
-test('unmarked vectors and unsupported Export formats yield previews without independent cutouts',async()=>{
+test('unmarked icons export as SVG while JPG-only photos stay out of the asset list',async()=>{
  const h=harness({initialSelection:true});await h.drain();
  const icon=frame('unconfigured-vector',h.a,'VECTOR');icon.width=20;icon.height=20;
- const photo=frame('jpg-only-photo',h.a,'RECTANGLE');photo.width=20;photo.height=20;photo.fills=[{type:'IMAGE',imageHash:'photo'}];photo.exportSettings=[{format:'JPG'}];
- await h.$('export').onclick();await h.drain();const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);assert.equal(done.assets.length,0);assert.equal(done.previews.length,1);
+ const photo=frame('jpg-only-photo',h.a,'RECTANGLE');photo.width=20;photo.height=20;photo.fills=[{type:'IMAGE',imageHash:'photo'}];photo.exportSettings=[{format:'JPG'}];photo.exportAsync=async()=>{throw Error('JPG photo must not be exported')};
+ await h.$('export').onclick();await h.drain();const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);assert.equal(done.assets.length,1);assert.equal(done.assets[0].format,'svg');assert.equal(done.assets[0].nodeIds[0],'unconfigured-vector');assert.equal(done.assetFailures.length,0);assert.equal(done.previews.length,1);
 });
 
 test('SVG-only Export does not add a PNG companion, and the UI sends no automatic asset option',async()=>{
  const h=harness({initialSelection:true});await h.drain();const n=frame('svg-only-icon',h.a,'VECTOR');n.width=24;n.height=24;n.exportSettings=[{format:'SVG'}];const calls=[];n.exportAsync=async setting=>{calls.push(setting.format);return new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"/>')};
- const unmarked=frame('unmarked-icon',h.a,'VECTOR');unmarked.width=16;unmarked.height=16;unmarked.exportAsync=async()=>{throw Error('Unmarked icon must not be exported')};
- await h.$('export').onclick();await h.drain();const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);assert.deepEqual(calls,['SVG']);assert.equal(done.assets.length,1);assert.equal(done.assets[0].format,'svg');assert.equal(done.previews.length,1);assert.equal(Object.hasOwn(h.sent.find(m=>m.type==='export').options,'autoAssets'),false);
- const zip=await JSZip.loadAsync(await h.blob().arrayBuffer()),name=Object.keys(zip.files).find(p=>p.endsWith('data/assets.json')),assets=JSON.parse(await zip.file(name).async('string'));assert.equal(assets.length,1);assert.equal(assets[0].format,'svg');assert.equal(Object.values(zip.files).filter(f=>!f.dir&&/\/assets\/.+\.png$/.test(f.name)).length,0);
+ const unmarked=frame('unmarked-icon',h.a,'VECTOR');unmarked.width=16;unmarked.height=16;unmarked.exportAsync=async setting=>{assert.equal(setting.format,'SVG');return new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>')};
+ await h.$('export').onclick();await h.drain();const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);assert.deepEqual(calls,['SVG']);assert.equal(done.assets.length,2);assert.ok(done.assets.every(a=>a.format==='svg'));assert.equal(done.previews.length,1);assert.equal(Object.hasOwn(h.sent.find(m=>m.type==='export').options,'autoAssets'),false);
+ const zip=await JSZip.loadAsync(await h.blob().arrayBuffer()),name=Object.keys(zip.files).find(p=>p.endsWith('data/assets.json')),assets=JSON.parse(await zip.file(name).async('string'));assert.equal(assets.length,2);assert.ok(assets.every(a=>a.format==='svg'));assert.equal(Object.values(zip.files).filter(f=>!f.dir&&/\/assets\/.+\.png$/.test(f.name)).length,0);
+});
+
+test('icon instances export once, separate toolbar icons export, and overlapping illustration paths do not',async()=>{
+ const h=harness({initialSelection:true});await h.drain();
+ function box(n,w,h,x,y){n.width=w;n.height=h;n.absoluteBoundingBox={x,y,width:w,height:h};return n;}
+ const icon=box(frame('icon-home',h.a,'INSTANCE'),24,24,0,0);icon.name='ic_home';
+ const path=box(frame('icon-path',icon,'VECTOR'),16,16,4,4);path.exportAsync=async()=>{throw Error('inner icon path')};
+ icon.exportAsync=async setting=>{assert.equal(setting.format,'SVG');return new TextEncoder().encode('<svg/>')};
+ const art=box(frame('illustration',h.a,'GROUP'),300,300,0,80);
+ for(let i=0;i<6;i++){const piece=box(frame('piece-'+i,art,'VECTOR'),20,20,i*8,i*8);piece.exportAsync=async()=>{throw Error('illustration path')};}
+ const chevron=box(frame('chevron',h.a,'VECTOR'),12,12,0,400);
+ chevron.exportAsync=async()=>new TextEncoder().encode('<svg/>');
+ for(let i=0;i<6;i++){const tool=box(frame('tool-'+i,h.a,'VECTOR'),16,16,i*24,420);tool.exportAsync=async()=>new TextEncoder().encode('<svg/>');}
+ await h.$('export').onclick();await h.drain();const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);
+ assert.equal(done.assetFailures.length,0);assert.ok(done.assets.every(a=>a.format==='svg'));
+ assert.equal(Array.from(done.assets,a=>a.nodeIds[0]).sort().join(),'chevron,icon-home,tool-0,tool-1,tool-2,tool-3,tool-4,tool-5');
 });
 
 test('an exported parent does not implicitly export descendants or suppress a child with its own Export setting',async()=>{

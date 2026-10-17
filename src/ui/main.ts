@@ -260,7 +260,9 @@ function packageWithName(zip, prefix, name) {
 }
 function assetFailureReason(f) {
   if (/may not have any visible layers|no visible layers/i.test(f.message || ''))
-    return 'Figma 未能导出可见内容。请检查图层及父级的可见性、透明度、裁剪和蒙版；不需要该切图时移除 Export。';
+    return f.source === 'auto'
+      ? 'Figma 未能导出可见内容。请检查图层及父级的可见性、透明度、裁剪和蒙版。'
+      : 'Figma 未能导出可见内容。请检查图层及父级的可见性、透明度、裁剪和蒙版；不需要该切图时移除 Export。';
   return f.message || 'Figma 未返回错误详情。';
 }
 function showExportDetails(failures, warnings = []) {
@@ -274,7 +276,7 @@ function showExportDetails(failures, warnings = []) {
     .join('\n\n');
 }
 function assetFailureText(f, index) {
-  return `${index + 1}. Page：${f.pageName}（${f.pageId}）\n区域：${f.regionName}（${f.regionId}）\n画板：${f.frameName}（${f.frameId}）\n切图：${f.nodeName}（${f.nodeId}） · ${f.format} · ${f.source === 'configured' ? '图层 Export 设置' : '历史自动识别'}\n图层路径：${(f.nodePath || []).map((n) => n.name + '（' + n.id + '）').join(' / ')}\n原因：${f.message}${assetFailureReason(f) !== f.message ? '\n建议：' + assetFailureReason(f) : ''}`;
+  return `${index + 1}. Page：${f.pageName}（${f.pageId}）\n区域：${f.regionName}（${f.regionId}）\n画板：${f.frameName}（${f.frameId}）\n切图：${f.nodeName}（${f.nodeId}） · ${f.format} · ${f.source === 'auto' ? '自动识别图标' : '图层 Export 设置'}\n图层路径：${(f.nodePath || []).map((n) => n.name + '（' + n.id + '）').join(' / ')}\n原因：${f.message}${assetFailureReason(f) !== f.message ? '\n建议：' + assetFailureReason(f) : ''}`;
 }
 async function buildPackage(message, job) {
   if (job.cancelled) throw Error('已取消。');
@@ -320,7 +322,7 @@ async function buildPackage(message, job) {
   if (!update) {
     zip.file(
       prefix + '使用说明.txt',
-      '解压整个 ZIP 后双击 index.html。\n预览默认 2×，可选 1×/3×；仅新预览尝试无损压缩，独立切图保持原 SVG/PNG。\n左侧分页面、切图、颜色；支持 Page、画板和父子图层目录。\n点击图层仅显示橙色轮廓与宽高；悬停同画板另一图层显示两者距离和蓝色四边定位虚线，移开恢复宽高。空格+拖动平移，Ctrl/Command+滚轮缩放。\n右侧为属性、填充、边框、字体、阴影、代码模板、导出；无属性的模块隐藏。数值可双击选中复制，色块可切换颜色格式；px/pt/dp 为 1:1 逻辑单位展示。\n代码提供 CSS 及基础 Android/iOS 属性模板；复杂效果、交互和响应式由开发实现，变量与图片路径需接入项目。字体不分发。\n选中已导出切图，普通点击卡片选格式，Option/Alt+点击卡片或画布切图使用浏览器原生保存；沿用原文件字节和名称。\n切图仅按图层显式 SVG/PNG Export，同格式取首条，PNG 保留倍率/固定宽高；跨画板按内容去重保留关联。\ndata/design.json 保存层级、位置、原生 CSS、布局、字体分段及颜色绑定；assets.json 保存切图设置与关联；previews.json 保存预览。\nX/Y 相对所属画板包围框原点。旋转/蒙版/非矩形按边界近似，距离不等于 CSS margin。\n局部更新替换整个所选 Frame/Section 子树，保留原位置与范围外内容，原 ZIP 保留。\n',
+      '解压整个 ZIP 后双击 index.html。\n预览默认 2×，可选 1×/3×；仅新预览尝试无损压缩，独立切图保持原 SVG/PNG。\n左侧分页面、切图、颜色；支持 Page、画板和父子图层目录。\n点击图层仅显示橙色轮廓与宽高；悬停同画板另一图层显示两者距离和蓝色四边定位虚线，移开恢复宽高。空格+拖动平移，Ctrl/Command+滚轮缩放。\n右侧为属性、填充、边框、字体、阴影、代码模板、导出；无属性的模块隐藏。数值可双击选中复制，色块可切换颜色格式；px/pt/dp 为 1:1 逻辑单位展示。\n代码提供 CSS 及基础 Android/iOS 属性模板；复杂效果、交互和响应式由开发实现，变量与图片路径需接入项目。字体不分发。\n选中已导出切图，普通点击卡片选格式，Option/Alt+点击卡片或画布切图使用浏览器原生保存；沿用原文件字节和名称。\n切图沿用图层 SVG/PNG Export，同格式取首条；没有 Export 的小图标会自动导出一份 SVG，成组图标只切最外层。图片和插画不会自动切。跨画板按内容去重保留关联。\ndata/design.json 保存层级、位置、原生 CSS、布局、字体分段及颜色绑定；assets.json 保存切图设置与关联；previews.json 保存预览。\nX/Y 相对所属画板包围框原点。旋转/蒙版/非矩形按边界近似，距离不等于 CSS margin。\n局部更新替换整个所选 Frame/Section 子树，保留原位置与范围外内容，原 ZIP 保留。\n',
     );
   }
   for (const [path, bytes] of job.files) {
