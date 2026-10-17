@@ -1,4 +1,4 @@
-"""Conservative static SVG identity, matching src/resource-identity.js."""
+"""Conservative static SVG identity, matching src/core/resource-identity.ts."""
 import json
 import re
 

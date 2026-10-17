@@ -9,6 +9,37 @@
 3. 从 Development 菜单运行「Figma 离线交付 · Offline Handoff」。这是本地开发插件，尚未发布到 Community。
 4. 更新已有安装：关闭插件，重新 `pnpm build`，再运行并确认版本 v1.6.0。改用另一目录时重新导入 `dist/manifest.json`。
 
+`dist/` 不进入版本库。克隆后必须先构建，再导入 `dist/manifest.json`。
+
+## 开发
+
+需要 Node.js 22 与 pnpm 8。
+
+| 命令 | 作用 |
+|---|---|
+| `pnpm build` | 用 esbuild 生成 `dist/` |
+| `pnpm watch` | 监听 `src/` 并重新构建 |
+| `pnpm test` | 先构建，再运行测试 |
+| `pnpm typecheck` | 检查 TypeScript |
+
+```
+src/plugin/code.ts   Figma 沙箱，只读设计稿
+src/ui/              插件面板
+src/core/            校验、合并、去重、预览压缩
+src/viewer/          打进交付包的离线查看器
+scripts/build.mjs    构建
+dist/                构建结果
+  manifest.json      Figma 导入这个文件
+  code.js            插件主线程
+  ui.html            插件面板
+  index.html         交付查看器
+  viewer.css
+  viewer.js
+  spacing.js
+```
+
+改查看器后要重新构建。Figma 加载的是 `dist/`，只改 `src/viewer` 不会生效。
+
 ## 导出交付包
 
 选择首次导出，勾选 Pages，或在 Figma 选中一个或多个 Frame / Section。填写可选的「交付包名称」，插件生成的 ZIP 基名与内部根目录保持一致；留空沿用文件名。系统保存时单独改 ZIP 名称不会重写包内目录。
@@ -99,8 +130,10 @@ CSS 供开发参考；变量需接入项目主题，图片占位地址需替换�
 - data/design-data.js：离线直接加载的数据，避免 file:// 的 JSON fetch 限制。
 - data/update-report.json：更新范围、资源去重与清理元数据，紧凑 JSON，不包含失败信息或日志。
 
-源码在 `src/plugin`（Figma 沙箱）、`src/ui`（插件面板）、`src/core`（打包与去重）、`src/viewer`（离线查看器）。修改后运行 `pnpm test`，它会先构建 `dist/`。Figma 导入的是 `dist/manifest.json`，不能只改 `src/viewer` 而不构建。
-
 v1.6.0 通过 115 项自动测试；Chrome 以原 MeaXure 预览和属性转换的测试数据验证 Group 实际点击、选中仅尺寸、悬停测距和四条画板定位虚线、缩放、面板收起、单位 / 代码模板切换、空模块恢复与数据不变。另验证 file:// 原生 SVG/PNG 下载与逐字节一致、实际插件桥接生成 ZIP、默认 2×、首条 Export、失败信息不入包及离线加载。未在用户真实 Figma 客户端实机导出验收。
 
-插件不发起网络请求，不修改或克隆原稿；Figma 自身加载云端文件仍使用其已有权限与连接。普通导出不消耗模型 token。第三方 ZIP 库：JSZip 3.10.1，许可见 vendor/JSZip-LICENSE.md。离线 WebP 编码器的来源、校验和与许可见 vendor/WebP-SOURCE.md、WebP-LICENSE.txt、Playwright-LICENSE.txt。
+插件不发起网络请求，不修改或克隆原稿；Figma 自身加载云端文件仍使用其已有权限与连接。普通导出不消耗模型 token。
+
+## 许可
+
+本仓库使用 [MIT](LICENSE)。第三方 ZIP 库为 JSZip 3.10.1，许可见 [vendor/JSZip-LICENSE.md](vendor/JSZip-LICENSE.md)。离线 WebP 编码器的来源、校验和与许可见 [vendor/WebP-SOURCE.md](vendor/WebP-SOURCE.md)、[WebP-LICENSE.txt](vendor/WebP-LICENSE.txt)、[Playwright-LICENSE.txt](vendor/Playwright-LICENSE.txt)。
