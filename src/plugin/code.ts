@@ -311,12 +311,77 @@ function serialize(root, pageId, nav, out, natives) {
         throw Error('无法读取混合文本样式：' + n.name);
       }
     }
+    const notes = readNotes(n);
+    if (notes) item.annotations = notes;
     out.push(item);
     natives.set(n.id, n);
     if (n.children)
       n.children.forEach((c) => visit(c, n.id, depth + 1, item.frameId, item.visible));
   }
   visit(root, null, 0, root.id, true);
+}
+
+/** Figma Dev Mode notes: label, category, and pinned properties. */
+function readNotes(n) {
+  let list;
+  try {
+    list = n.annotations;
+  } catch (e) {
+    return;
+  }
+  if (!list || typeof list.length !== 'number') return;
+  const notes = [];
+  for (let i = 0; i < list.length; i++) {
+    const source = list[i];
+    if (!source || typeof source !== 'object') continue;
+    const plain = typeof source.label === 'string' ? source.label : '';
+    const markdown = typeof source.labelMarkdown === 'string' ? source.labelMarkdown : '';
+    const label = (plain.trim() ? plain : markdown).trim();
+    const categoryId =
+      typeof source.categoryId === 'string' && source.categoryId ? source.categoryId : '';
+    const properties = [];
+    const props = source.properties;
+    if (props && typeof props.length === 'number') {
+      for (let j = 0; j < props.length; j++) {
+        const type = props[j] && props[j].type;
+        if (typeof type === 'string' && type && !properties.includes(type)) properties.push(type);
+      }
+    }
+    if (!label && !categoryId && !properties.length) continue;
+    const note: Record<string, any> = {};
+    if (label) note.label = label;
+    if (categoryId) note.categoryId = categoryId;
+    if (properties.length) note.properties = properties;
+    notes.push(note);
+  }
+  return notes.length ? notes : undefined;
+}
+async function attachNoteCategories(nodes) {
+  const api = figma.annotations;
+  if (!api || typeof api.getAnnotationCategoryByIdAsync !== 'function') return;
+  const ids = new Set<string>();
+  for (const item of nodes)
+    for (const note of item.annotations || []) if (note.categoryId) ids.add(note.categoryId);
+  if (!ids.size) return;
+  const categories = new Map();
+  for (const id of ids) {
+    check();
+    try {
+      const category = await api.getAnnotationCategoryByIdAsync(id);
+      if (category && typeof category.label === 'string' && category.label)
+        categories.set(id, {
+          id: typeof category.id === 'string' ? category.id : id,
+          label: category.label,
+          color: typeof category.color === 'string' ? category.color : '',
+        });
+    } catch (e) {
+      /* A missing category still leaves the note text on the layer. */
+    }
+  }
+  for (const item of nodes)
+    for (const note of item.annotations || [])
+      if (note.categoryId && categories.has(note.categoryId))
+        note.category = categories.get(note.categoryId);
 }
 
 /** First explicit SVG and PNG export on the layer. */
@@ -451,6 +516,54 @@ function exportPlan(n) {
   for (let p = n.parent; p && p.type !== 'PAGE'; p = p.parent)
     if (candidateSettings(p).length || isAutoIcon(p)) return null;
   return { settings: [{ format: 'SVG' }], source: 'auto' };
+}
+function shownPaint(p) {
+  return !!p && p.visible !== false && !(typeof p.opacity === 'number' && p.opacity <= 0);
+}
+function hasShownPaint(n) {
+  for (const key of ['fills', 'strokes']) {
+    const list = n[key];
+    if (typeof list === 'symbol') return true;
+    if (Array.isArray(list) && list.some(shownPaint)) return true;
+  }
+  const effects = n.effects;
+  if (typeof effects === 'symbol') return true;
+  if (Array.isArray(effects) && effects.some((e) => e && e.visible !== false)) return true;
+  if (n.type === 'TEXT' && (typeof n.characters === 'symbol' || n.characters)) return true;
+  return false;
+}
+function paintsExplicitlyHidden(n) {
+  let any = false;
+  for (const key of ['fills', 'strokes']) {
+    const list = n[key];
+    if (typeof list === 'symbol') return false;
+    if (!Array.isArray(list) || !list.length) continue;
+    any = true;
+    if (list.some(shownPaint)) return false;
+  }
+  return any;
+}
+function booleanOperand(n) {
+  for (let p = n.parent; p && p.type !== 'PAGE'; p = p.parent)
+    if (p.type === 'BOOLEAN_OPERATION') return true;
+  return false;
+}
+/** Layers the eye still shows, but Figma cannot export as their own image. */
+function invisibleCutout(n, memo) {
+  if (!n) return true;
+  if (n.id && memo.has(n.id)) return memo.get(n.id);
+  let hidden = n.visible === false || n.opacity === 0;
+  if (!hidden && !hasShownPaint(n)) {
+    const kids = n.children || [];
+    hidden = kids.length
+      ? kids.every((child) => invisibleCutout(child, memo))
+      : paintsExplicitlyHidden(n) || booleanOperand(n);
+  }
+  if (n.id) memo.set(n.id, hidden);
+  return hidden;
+}
+function noVisibleLayers(e) {
+  return /may not have any visible layers|no visible layers/i.test(errorText(e));
 }
 // Section PNG exports can include Figma-specific margins and can downscale a whole
 // canvas. Compose independent raster previews in a self-contained SVG instead.
@@ -839,11 +952,13 @@ async function collect(options) {
   fragmentMemo = new Map();
   const groups = [];
   let cutoutCount = 0;
+  const invisibleMemo = new Map();
   post('progress', { message: `整理切图：${nodes.length} 个图层` });
   for (const data of nodes) {
     check();
     const n = natives.get(data.id);
     if (!data.visible || data.opacity === 0 || data.width <= 0 || data.height <= 0) continue;
+    if (invisibleCutout(n, invisibleMemo)) continue;
     const plan = exportPlan(n);
     if (!plan) continue;
     const jobs = [];
@@ -917,6 +1032,9 @@ async function collect(options) {
             outcomes[index] = asset;
           } catch (e) {
             if (cancelled) throw e;
+            // Figma uses this when the layer eye is on but nothing paints:
+            // hidden fills, empty boolean operands, masks, or a fully clipped node.
+            if (noVisibleLayers(e)) continue;
             const frame = natives.get(data.frameId),
               region = natives.get(data.regionId),
               page = pageOf(n),
@@ -1010,6 +1128,7 @@ async function collect(options) {
     serialize(root, pageOf(root).id, screenRoots(root), endNodes, endNative);
   if (designEdited(nodes, endNodes))
     throw Error('导出过程中设计稿发生变化，请停止编辑后重新导出。');
+  await attachNoteCategories(nodes);
   for (const item of nodes) if (cssRecords.has(item.id)) item.figmaCSS = cssRecords.get(item.id);
   for (const item of nodes)
     if (colorRecords.has(item.id)) item.colorBindings = colorRecords.get(item.id);

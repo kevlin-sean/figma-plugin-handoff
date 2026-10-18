@@ -110,6 +110,19 @@ test('shared asset names follow the selected instance and unsafe file-name chara
  const fixture=exportFixture(),{run,c}=viewer(fixture);assert.equal(run("assetFilename(assets[0],byId.get('b'))"),'其他实例.svg');c.a={format:'png',name:'bad/name:*?.png'};assert.equal(run('assetFilename(a,null)'),'bad-name---.png');c.a.name='CON';assert.equal(run('assetFilename(a,null)'),'asset-CON.png');c.a.name='🙂'.repeat(100);assert(Buffer.byteLength(run('assetFilename(a,null)'),'utf8')<255);
 });
 
+test('figma notes render category, text and properties, and stay hidden when a layer has none',()=>{
+ const {run,elements}=viewer();
+ run("byId.get('a').annotations=[{label:'说明annotation <b>\\n第二行',properties:['width','fills','futureProp']},{label:'第二段',category:{id:'cat',label:'交互',color:'blue'}},{categoryId:'gone',properties:['opacity']}]");
+ run("renderInspector();directory='layers';renderNav()");
+ const html=elements.get('inspectPanel').innerHTML;
+ assert.match(html,/注释/);assert.match(html,/无分类/);assert.match(html,/说明annotation &lt;b&gt;/);assert.match(html,/第二行/);
+ assert.match(html,/<li>宽度<\/li>/);assert.match(html,/<li>填充<\/li>/);assert.match(html,/<li>futureProp<\/li>/);
+ assert.match(html,/交互/);assert.match(html,/data-color="blue"/);assert.match(html,/第二段/);assert.match(html,/未知分类/);assert.match(html,/<li>不透明度<\/li>/);
+ assert.doesNotMatch(html,/<b>/);assert.match(elements.get('navigation').innerHTML,/aria-label="有注释"/);
+ assert.equal(run('notesPanel({})'),'');assert.equal(run('notesPanel({annotations:[]})'),'');assert.equal(run('noteBadge({})'),'');
+ run("byId.get('a').annotations=undefined;renderInspector();renderNav()");
+ assert.doesNotMatch(elements.get('inspectPanel').innerHTML,/layer-note/);assert.doesNotMatch(elements.get('navigation').innerHTML,/有注释/);
+});
 test('empty and hidden paints and effects omit entire inspector sections while visible zero values remain',()=>{
  const {c,run}=viewer();
  for(const n of [{},{fills:[],strokes:[],effects:[]},{fills:'MIXED',strokes:'MIXED',effects:null},{fills:[{type:'SOLID',visible:false}],strokes:[{type:'SOLID',visible:false}],effects:[{type:'DROP_SHADOW',visible:false}]}]){

@@ -292,12 +292,73 @@
           throw Error("\u65E0\u6CD5\u8BFB\u53D6\u6DF7\u5408\u6587\u672C\u6837\u5F0F\uFF1A" + n.name);
         }
       }
+      const notes = readNotes(n);
+      if (notes) item.annotations = notes;
       out.push(item);
       natives.set(n.id, n);
       if (n.children)
         n.children.forEach((c) => visit(c, n.id, depth + 1, item.frameId, item.visible));
     }
     visit(root, null, 0, root.id, true);
+  }
+  function readNotes(n) {
+    let list;
+    try {
+      list = n.annotations;
+    } catch (e) {
+      return;
+    }
+    if (!list || typeof list.length !== "number") return;
+    const notes = [];
+    for (let i = 0; i < list.length; i++) {
+      const source = list[i];
+      if (!source || typeof source !== "object") continue;
+      const plain = typeof source.label === "string" ? source.label : "";
+      const markdown = typeof source.labelMarkdown === "string" ? source.labelMarkdown : "";
+      const label = (plain.trim() ? plain : markdown).trim();
+      const categoryId = typeof source.categoryId === "string" && source.categoryId ? source.categoryId : "";
+      const properties = [];
+      const props = source.properties;
+      if (props && typeof props.length === "number") {
+        for (let j = 0; j < props.length; j++) {
+          const type = props[j] && props[j].type;
+          if (typeof type === "string" && type && !properties.includes(type)) properties.push(type);
+        }
+      }
+      if (!label && !categoryId && !properties.length) continue;
+      const note = {};
+      if (label) note.label = label;
+      if (categoryId) note.categoryId = categoryId;
+      if (properties.length) note.properties = properties;
+      notes.push(note);
+    }
+    return notes.length ? notes : void 0;
+  }
+  async function attachNoteCategories(nodes) {
+    const api = figma.annotations;
+    if (!api || typeof api.getAnnotationCategoryByIdAsync !== "function") return;
+    const ids = /* @__PURE__ */ new Set();
+    for (const item of nodes)
+      for (const note of item.annotations || []) if (note.categoryId) ids.add(note.categoryId);
+    if (!ids.size) return;
+    const categories = /* @__PURE__ */ new Map();
+    for (const id of ids) {
+      check();
+      try {
+        const category = await api.getAnnotationCategoryByIdAsync(id);
+        if (category && typeof category.label === "string" && category.label)
+          categories.set(id, {
+            id: typeof category.id === "string" ? category.id : id,
+            label: category.label,
+            color: typeof category.color === "string" ? category.color : ""
+          });
+      } catch (e) {
+      }
+    }
+    for (const item of nodes)
+      for (const note of item.annotations || [])
+        if (note.categoryId && categories.has(note.categoryId))
+          note.category = categories.get(note.categoryId);
   }
   function candidateSettings(n) {
     const formats = /* @__PURE__ */ new Set();
@@ -405,6 +466,51 @@
     for (let p = n.parent; p && p.type !== "PAGE"; p = p.parent)
       if (candidateSettings(p).length || isAutoIcon(p)) return null;
     return { settings: [{ format: "SVG" }], source: "auto" };
+  }
+  function shownPaint(p) {
+    return !!p && p.visible !== false && !(typeof p.opacity === "number" && p.opacity <= 0);
+  }
+  function hasShownPaint(n) {
+    for (const key of ["fills", "strokes"]) {
+      const list = n[key];
+      if (typeof list === "symbol") return true;
+      if (Array.isArray(list) && list.some(shownPaint)) return true;
+    }
+    const effects = n.effects;
+    if (typeof effects === "symbol") return true;
+    if (Array.isArray(effects) && effects.some((e) => e && e.visible !== false)) return true;
+    if (n.type === "TEXT" && (typeof n.characters === "symbol" || n.characters)) return true;
+    return false;
+  }
+  function paintsExplicitlyHidden(n) {
+    let any = false;
+    for (const key of ["fills", "strokes"]) {
+      const list = n[key];
+      if (typeof list === "symbol") return false;
+      if (!Array.isArray(list) || !list.length) continue;
+      any = true;
+      if (list.some(shownPaint)) return false;
+    }
+    return any;
+  }
+  function booleanOperand(n) {
+    for (let p = n.parent; p && p.type !== "PAGE"; p = p.parent)
+      if (p.type === "BOOLEAN_OPERATION") return true;
+    return false;
+  }
+  function invisibleCutout(n, memo) {
+    if (!n) return true;
+    if (n.id && memo.has(n.id)) return memo.get(n.id);
+    let hidden = n.visible === false || n.opacity === 0;
+    if (!hidden && !hasShownPaint(n)) {
+      const kids = n.children || [];
+      hidden = kids.length ? kids.every((child) => invisibleCutout(child, memo)) : paintsExplicitlyHidden(n) || booleanOperand(n);
+    }
+    if (n.id) memo.set(n.id, hidden);
+    return hidden;
+  }
+  function noVisibleLayers(e) {
+    return /may not have any visible layers|no visible layers/i.test(errorText(e));
   }
   function errorText(e) {
     return e && e.message ? e.message : typeof e === "string" ? e : String(e || "Figma \u672A\u8FD4\u56DE\u9519\u8BEF\u8BE6\u60C5");
@@ -728,11 +834,13 @@
     fragmentMemo = /* @__PURE__ */ new Map();
     const groups = [];
     let cutoutCount = 0;
+    const invisibleMemo = /* @__PURE__ */ new Map();
     post("progress", { message: `\u6574\u7406\u5207\u56FE\uFF1A${nodes.length} \u4E2A\u56FE\u5C42` });
     for (const data of nodes) {
       check();
       const n = natives.get(data.id);
       if (!data.visible || data.opacity === 0 || data.width <= 0 || data.height <= 0) continue;
+      if (invisibleCutout(n, invisibleMemo)) continue;
       const plan = exportPlan(n);
       if (!plan) continue;
       const jobs = [];
@@ -801,6 +909,7 @@
               outcomes[index] = asset;
             } catch (e) {
               if (cancelled) throw e;
+              if (noVisibleLayers(e)) continue;
               const frame = natives.get(data.frameId), region = natives.get(data.regionId), page = pageOf(n), nodePath = [];
               for (let parent = n; parent && parent.type !== "PAGE"; parent = parent.parent)
                 nodePath.unshift({ id: parent.id, name: parent.name });
@@ -869,6 +978,7 @@
       serialize(root, pageOf(root).id, screenRoots(root), endNodes, endNative);
     if (designEdited(nodes, endNodes))
       throw Error("\u5BFC\u51FA\u8FC7\u7A0B\u4E2D\u8BBE\u8BA1\u7A3F\u53D1\u751F\u53D8\u5316\uFF0C\u8BF7\u505C\u6B62\u7F16\u8F91\u540E\u91CD\u65B0\u5BFC\u51FA\u3002");
+    await attachNoteCategories(nodes);
     for (const item of nodes) if (cssRecords.has(item.id)) item.figmaCSS = cssRecords.get(item.id);
     for (const item of nodes)
       if (colorRecords.has(item.id)) item.colorBindings = colorRecords.get(item.id);

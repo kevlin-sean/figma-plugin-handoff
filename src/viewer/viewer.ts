@@ -217,7 +217,7 @@ function renderNav() {
     .map(({ node: n, level }) => {
       const children = layerChildren.get(n.id) || [],
         open = expandedLayers.has(n.id);
-      return `<div id="layer-${layerIndexes.get(n.id)}" class="layer-row ${selected === n.id ? 'active' : path.has(n.id) ? 'ancestor' : ''} ${n.visible === false ? 'is-hidden' : ''}" role="treeitem" aria-level="${level}" aria-selected="${selected === n.id}" ${children.length ? `aria-expanded="${open}"` : ''} tabindex="${treeFocusId === n.id ? '0' : '-1'}" data-layer="${esc(n.id)}" style="--level:${Math.min(level - 1, 12)}" title="${esc(n.name + ' · ' + n.type + ' · ' + n.id)}">${children.length ? `<button class="layer-disclosure" tabindex="-1" data-toggle-layer="${esc(n.id)}" aria-label="${open ? '收起' : '展开'} ${esc(n.name)}">${open ? '▾' : '▸'}</button>` : '<span class="layer-spacer"></span>'}<span class="layer-icon" aria-hidden="true">${layerGlyph(n)}</span><span class="layer-name">${esc(n.name)}</span><span class="layer-state">${n.locked === true ? '<span title="已锁定（只读）" aria-label="已锁定"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg></span>' : ''}${n.visible === false ? '<span title="图层或其父级已隐藏" aria-label="已隐藏"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2-4 7-4 7 4 7 4-2 4-7 4-7-4-7-4ZM2 2l12 12"/></svg></span>' : ''}</span></div>`;
+      return `<div id="layer-${layerIndexes.get(n.id)}" class="layer-row ${selected === n.id ? 'active' : path.has(n.id) ? 'ancestor' : ''} ${n.visible === false ? 'is-hidden' : ''}" role="treeitem" aria-level="${level}" aria-selected="${selected === n.id}" ${children.length ? `aria-expanded="${open}"` : ''} tabindex="${treeFocusId === n.id ? '0' : '-1'}" data-layer="${esc(n.id)}" style="--level:${Math.min(level - 1, 12)}" title="${esc(n.name + ' · ' + n.type + ' · ' + n.id)}">${children.length ? `<button class="layer-disclosure" tabindex="-1" data-toggle-layer="${esc(n.id)}" aria-label="${open ? '收起' : '展开'} ${esc(n.name)}">${open ? '▾' : '▸'}</button>` : '<span class="layer-spacer"></span>'}<span class="layer-icon" aria-hidden="true">${layerGlyph(n)}</span><span class="layer-name">${esc(n.name)}</span><span class="layer-state">${noteBadge(n)}${n.locked === true ? '<span title="已锁定（只读）" aria-label="已锁定"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg></span>' : ''}${n.visible === false ? '<span title="图层或其父级已隐藏" aria-label="已隐藏"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2-4 7-4 7 4 7 4-2 4-7 4-7-4-7-4ZM2 2l12 12"/></svg></span>' : ''}</span></div>`;
     })
     .join('');
   const boards = pageBoards(),
@@ -225,7 +225,7 @@ function renderNav() {
   const cards = boards
     .map(
       (n) =>
-        `<button class="board-card ${selectedFrame.id === n.id ? 'active' : ''}" data-focus="${esc(n.id)}" ${selectedFrame.id === n.id ? 'aria-current="true"' : ''}>${boardThumbnail(n)}<span class="board-info"><strong>${esc(n.name)}</strong><small>${esc(currentPage.name)} · ${num(n.width)} × ${num(n.height)}</small></span></button>`,
+        `<button id="board-${layerIndexes.get(n.id)}" class="board-card ${selectedFrame.id === n.id ? 'active' : ''}" data-focus="${esc(n.id)}" ${selectedFrame.id === n.id ? 'aria-current="true"' : ''}>${boardThumbnail(n)}<span class="board-info"><strong>${esc(n.name)}</strong><small>${esc(currentPage.name)} · ${num(n.width)} × ${num(n.height)}</small></span></button>`,
     )
     .join('');
   $('navigation').innerHTML =
@@ -246,6 +246,13 @@ function scrollLayer(id, focus = false) {
   if (focus) row.focus?.({ preventScroll: true });
   row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
 }
+function pinNav(id) {
+  const key = layerIndexes.get(id);
+  const board = document.getElementById('board-' + key);
+  const row = document.getElementById('layer-' + key);
+  const target = directory === 'layers' ? row || board : board || row;
+  target?.scrollIntoView?.({ block: 'start', inline: 'nearest' });
+}
 function toggleLayer(id) {
   if (!(layerChildren.get(id) || []).length) return;
   if (expandedLayers.has(id)) expandedLayers.delete(id);
@@ -260,12 +267,42 @@ function inspectLayer(id) {
   panel();
   scrollLayer(id, true);
 }
+const pageTypes = new Set(['FRAME', 'SECTION', 'COMPONENT', 'INSTANCE', 'COMPONENT_SET']);
+function pageTitles(region) {
+  const list = [],
+    seen = new Set();
+  const add = (n) => {
+    if (!n || seen.has(n.id) || !pageTypes.has(n.type)) return;
+    if (n.id !== region.id && n.regionId !== region.id) return;
+    seen.add(n.id);
+    list.push(n);
+  };
+  if (region.type === 'SECTION' || frames.some((f) => f.id === region.id)) add(region);
+  for (const f of frames) if (f.regionId === region.id) add(f);
+  const current = getFrame(byId.get(selected));
+  return list
+    .map((n) => {
+      const b = box(n, region),
+        on = current?.id === n.id;
+      return `<span class="board-label-anchor" style="left:${b.x}px;top:${b.y}px"><button type="button" class="board-label${on ? ' active' : ''}" data-board="${esc(n.id)}" aria-label="${esc('选中 ' + n.name)}" title="${esc(n.name)}" ${on ? 'aria-current="true"' : ''}>${esc(n.name)}</button></span>`;
+    })
+    .join('');
+}
+function syncBoardLabels() {
+  const current = getFrame(byId.get(selected));
+  document.querySelectorAll('[data-board]').forEach((el) => {
+    const on = el.dataset.board === current?.id;
+    el.classList.toggle('active', on);
+    if (on) el.setAttribute('aria-current', 'true');
+    else el.removeAttribute('aria-current');
+  });
+}
 function renderScene() {
   $('scene').innerHTML = regions
     .map((r) => {
       const b = box(r),
         p = D.previews.find((p) => p.id === r.id);
-      return `<div class="region" id="region-${r.id.replace(':', '-')}" data-region="${esc(r.id)}" style="left:${b.x - bounds.x + pad}px;top:${b.y - bounds.y + pad}px;width:${b.w}px;height:${b.h}px"><span class="region-label">${esc(r.name)} · ${num(b.x)}, ${num(b.y)}</span><div style="position:absolute;inset:0;overflow:hidden;pointer-events:none"><img style="position:absolute;left:${p.offsetX ?? -(p.inset || 0)}px;top:${p.offsetY ?? -(p.inset || 0)}px;width:${p.displayWidth ?? p.pixelWidth / p.scale}px;height:${p.displayHeight ?? p.pixelHeight / p.scale}px" src="${esc(p.path)}" alt="${esc(r.name + '原始设计稿')}" draggable="false"></div>${(p.patches || []).map((q) => `<div style="position:absolute;left:${q.x}px;top:${q.y}px;width:${q.width}px;height:${q.height}px;background:${q.background};pointer-events:none"><img src="${esc(q.path)}" alt="" draggable="false" style="display:block;width:100%;height:100%"></div>`).join('')}<svg data-overlay="${esc(r.id)}" aria-hidden="true"></svg></div>`;
+      return `<div class="region" id="region-${r.id.replace(':', '-')}" data-region="${esc(r.id)}" style="left:${b.x - bounds.x + pad}px;top:${b.y - bounds.y + pad}px;width:${b.w}px;height:${b.h}px">${pageTitles(r)}<div style="position:absolute;inset:0;overflow:hidden;pointer-events:none"><img style="position:absolute;left:${p.offsetX ?? -(p.inset || 0)}px;top:${p.offsetY ?? -(p.inset || 0)}px;width:${p.displayWidth ?? p.pixelWidth / p.scale}px;height:${p.displayHeight ?? p.pixelHeight / p.scale}px" src="${esc(p.path)}" alt="${esc(r.name + '原始设计稿')}" draggable="false"></div>${(p.patches || []).map((q) => `<div style="position:absolute;left:${q.x}px;top:${q.y}px;width:${q.width}px;height:${q.height}px;background:${q.background};pointer-events:none"><img src="${esc(q.path)}" alt="" draggable="false" style="display:block;width:100%;height:100%"></div>`).join('')}<svg data-overlay="${esc(r.id)}" aria-hidden="true"></svg></div>`;
     })
     .join('');
   resizeStage();
@@ -276,6 +313,7 @@ function resizeStage() {
   $('scene').style.width = w + 'px';
   $('scene').style.height = h + 'px';
   $('scene').style.transform = `scale(${zoom})`;
+  $('scene').style.setProperty?.('--z', String(zoom));
   $('stage').style.width = Math.max(w * zoom, $('viewport').clientWidth) + 'px';
   $('stage').style.height = Math.max(h * zoom, $('viewport').clientHeight) + 'px';
   $('zoomValue').textContent = Math.round(zoom * 100) + '%';
@@ -314,7 +352,7 @@ function focusNode(id) {
   v.scrollTop = Math.max(0, (b.y - bounds.y + pad) * zoom - 45);
   $('crumb').textContent = byId.get(n.regionId).name + ' / ' + n.name;
   renderNav();
-  scrollLayer(id);
+  pinNav(id);
   renderInspector();
   $('inspectPanel').scrollTop = 0;
   renderAssets();
@@ -799,8 +837,21 @@ function updateNativeDownload(point) {
   // native Save Link behavior for file:// pages in Chromium.
   if (nativeDownloadLink.parentElement !== point.region) point.region.append(nativeDownloadLink);
 }
+function focusBoard(id) {
+  const n = byId.get(id);
+  if (!n) return;
+  directory = frames.some((f) => f.id === id) ? 'boards' : 'layers';
+  if (library !== 'pages') setLibrary('pages');
+  else if ($('sidebar').hidden) togglePanel('left');
+  focusNode(id);
+}
 function handleCanvasClick(e) {
   if (suppressClick || space || panMode) return;
+  const board = e.target.closest?.('[data-board]');
+  if (board) {
+    focusBoard(board.dataset.board);
+    return;
+  }
   hitIds = pointerHits(e);
   if (!hitIds.length) return;
   const id = canvasExportSelection(hitIds);
@@ -1189,6 +1240,82 @@ function templateCode(n, type) {
     lines.push('// 描边、多重填充和阴影按设计数据补充。');
   return lines.join('\n');
 }
+const notePropertyLabels = {
+  width: '宽度',
+  height: '高度',
+  maxWidth: '最大宽度',
+  minWidth: '最小宽度',
+  maxHeight: '最大高度',
+  minHeight: '最小高度',
+  fills: '填充',
+  strokes: '描边',
+  effects: '效果',
+  strokeWeight: '描边粗细',
+  cornerRadius: '圆角',
+  textStyleId: '文本样式',
+  textAlignHorizontal: '水平对齐',
+  fontFamily: '字体',
+  fontStyle: '字体样式',
+  fontSize: '字号',
+  fontWeight: '字重',
+  lineHeight: '行高',
+  letterSpacing: '字距',
+  itemSpacing: '间距',
+  padding: '内边距',
+  layoutMode: '自动布局',
+  alignItems: '对齐',
+  opacity: '不透明度',
+  mainComponent: '主组件',
+  gridRowGap: '行间距',
+  gridColumnGap: '列间距',
+  gridRowCount: '行数',
+  gridColumnCount: '列数',
+  gridRowAnchorIndex: '行锚点',
+  gridColumnAnchorIndex: '列锚点',
+  gridRowSpan: '行跨度',
+  gridColumnSpan: '列跨度',
+};
+const noteColors = new Set(['yellow', 'orange', 'red', 'pink', 'violet', 'blue', 'teal', 'green']);
+function layerNotes(n) {
+  return Array.isArray(n?.annotations) ? n.annotations.filter((note) => note && typeof note === 'object') : [];
+}
+function noteBadge(n) {
+  const list = layerNotes(n);
+  if (!list.length) return '';
+  const text = list
+    .map((note) => note.label)
+    .filter((label) => typeof label === 'string' && label)
+    .join('\n');
+  return `<span class="layer-note-mark" title="${esc(text ? '注释：' + text : '有注释')}" aria-label="有注释"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v6.5H8.2L5.5 13V10H3z"/></svg></span>`;
+}
+function notesPanel(n) {
+  const list = layerNotes(n);
+  if (!list.length) return '';
+  const body = list
+    .map((note) => {
+      const named = note.category && typeof note.category.label === 'string' ? note.category.label.trim() : '';
+      const category = named || (note.categoryId ? '未知分类' : '无分类');
+      const color =
+        note.category && noteColors.has(note.category.color) ? note.category.color : '';
+      const text = typeof note.label === 'string' ? note.label : '';
+      const props = Array.isArray(note.properties)
+        ? note.properties.filter((type) => typeof type === 'string' && type)
+        : [];
+      return (
+        '<article class="layer-note"><p class="layer-note-category">' +
+        (color ? `<i data-color="${esc(color)}"></i>` : '') +
+        esc(category) +
+        '</p>' +
+        (text ? `<p class="layer-note-body">${esc(text)}</p>` : '') +
+        (props.length
+          ? `<ul class="layer-note-props">${props.map((type) => `<li>${esc(notePropertyLabels[type] || type)}</li>`).join('')}</ul>`
+          : '') +
+        '</article>'
+      );
+    })
+    .join('');
+  return refSection('注释', body, 'note-section');
+}
 function cssPanel(n) {
   if (!Object.values(cssData(n).groups).some((entries) => entries.length)) return '';
   const type = ['css', 'android', 'ios'].includes(codeTemplate) ? codeTemplate : 'css',
@@ -1221,6 +1348,7 @@ function renderInspector() {
     );
   $('inspectPanel').innerHTML =
     `<h2 class="mx-node-name">${esc(n.name)}</h2>` +
+    notesPanel(n) +
     refSection('属性', properties) +
     fillsPanel(n) +
     bordersPanel(n) +
@@ -1309,6 +1437,7 @@ function drawOverlay() {
     }
     svg.innerHTML = s;
   });
+  syncBoardLabels();
 }
 function contains(n, x, y) {
   const t = n.absoluteTransform;

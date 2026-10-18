@@ -10,21 +10,23 @@ function harness({initialSelection=false,disconnect=false,nativeSource=null,uiSo
  if(initialSelection)p1.selection=[a];
  const native={figma:{base64Encode:a=>Buffer.from(a).toString('base64'),root:{name:'Fixture',children:[p1,p2]},currentPage:p1,fileKey:'fixture',on(name,fn){events[name]=fn},showUI(html){channel=html},ui:{postMessage(message){outgoing.push(message);if(ui&&!disconnect)tasks.push(ui.window.onmessage({source:null,data:{pluginMessage:message}}));}}},__html__:'__HANDOFF_CHANNEL__',console,Uint8Array,DataView};
  vm.createContext(native);vm.runInContext(nativeSource||fs.readFileSync(path.join(root,'dist/code.js'),'utf8'),native);
- const els=new Map(),$=id=>{if(!els.has(id))els.set(id,new Element());return els.get(id)},choice={mode:{value:'new'},scope:{value:'selection'}};
+ const els=new Map(),$=id=>{if(!els.has(id))els.set(id,new Element());return els.get(id)};
+ const scopeRadios=['selection','pages'].map(value=>{const el=new Element();el.value=value;el.checked=value==='selection';return el;});
+ const choice={mode:{value:'new'},scope:{get value(){return (scopeRadios.find(r=>r.checked)||scopeRadios[0]).value;},set value(v){for(const r of scopeRadios)r.checked=r.value===v;}}};
  $('previewScale').value='1';
  const pageInputs=()=>$('pages').children.map(label=>label.children[0]);
- const document={getElementById:$,querySelector(s){return s.includes('name=mode')?choice.mode:choice.scope;},querySelectorAll(s){if(s==='#pages input:checked')return pageInputs().filter(e=>e.checked);if(s==='input,select')return [...els.values(),...pageInputs()];return[];},createElement(){return new Element()},createTextNode(text){return{textContent:text}}};
+ const document={getElementById:$,querySelector(s){return s.includes('name=mode')?choice.mode:choice.scope;},querySelectorAll(s){if(s==='input[name=scope]')return scopeRadios;if(s==='#pages input:checked')return pageInputs().filter(e=>e.checked);if(s==='input,select')return [...els.values(),...pageInputs()];return[];},createElement(){return new Element()},createTextNode(text){return{textContent:text}}};
  const timers=new Map();let nextTimer=0;
  ui={document,parent:{postMessage({pluginMessage}){sent.push(pluginMessage);tasks.push(native.figma.ui.onmessage(pluginMessage));}},window:{addEventListener(){}},HandoffCore:C,HandoffOptimizer:require('../dist/core/optimize-package.cjs'),JSZip,VIEWER:Object.fromEntries(['index.html','viewer.js','viewer.css','spacing.js'].map(n=>[n,fs.readFileSync(path.join(root,'dist',n),'utf8')])),console,Uint8Array,Blob,URL:{createObjectURL(value){blob=value;return'blob:result'},revokeObjectURL(){}},setTimeout(fn){timers.set(++nextTimer,fn);return nextTimer},clearTimeout(id){timers.delete(id)}};
  vm.createContext(ui);vm.runInContext((uiSource||fs.readFileSync(path.join(root,'dist/ui.js'),'utf8')).replaceAll('__HANDOFF_CHANNEL__',channel),ui);
  async function drain(){while(tasks.length){const pending=tasks.splice(0);await Promise.all(pending);}}
- return{native,ui,$,p1,p2,a,b,c,sent,outgoing,choice,events,pageInputs,timers,channel,drain,blob:()=>blob};
+ return{native,ui,$,p1,p2,a,b,c,sent,outgoing,choice,events,pageInputs,scopeRadios,timers,channel,drain,blob:()=>blob};
 }
 test('startup selection reaches UI despite a null MessageEvent.source',async()=>{const h=harness({initialSelection:true});await h.drain();assert.match(h.$('selection').textContent,/Design a/);assert.match(h.$('connection').textContent,/已连接 Figma/);assert.equal(h.pageInputs().length,2);assert.equal(h.timers.size,0);});
 test('a dropped selectionchange event cannot block exporting the current Frame; ZIP is generated',async()=>{const h=harness();await h.drain();assert.match(h.$('selection').textContent,/无/);h.p1.selection=[h.a];await h.$('export').onclick();await h.drain();assert.equal(h.$('download').hidden,false,h.$('status').textContent);assert.ok(h.sent.some(m=>m.type==='get-state'));const zip=await JSZip.loadAsync(await h.blob().arrayBuffer()),file=Object.keys(zip.files).find(n=>n.endsWith('data/design.json')),design=JSON.parse(await zip.file(file).async('string'));assert.deepEqual(design.pages[0].regions,['a']);assert.equal(design.nodes[0].id,'a');assert.equal(h.timers.size,0);});
 test('selecting a Section after plugin startup exports the Section',async()=>{const h=harness();await h.drain();h.p1.selection=[h.b];h.events.selectionchange();await h.drain();assert.match(h.$('selection').textContent,/Design b/);await h.$('export').onclick();await h.drain();const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);assert.deepEqual(Array.from(done.selectedRootIds),['b']);assert.equal(done.design.nodes[0].type,'SECTION');});
-test('switching Page refreshes selection and keeps manually chosen Page checkboxes',async()=>{const h=harness();await h.drain();h.pageInputs()[0].checked=false;h.pageInputs()[1].checked=true;h.p2.selection=[h.c];h.native.figma.currentPage=h.p2;h.events.currentpagechange();await h.drain();assert.match(h.$('selection').textContent,/Design c/);assert.deepEqual(h.pageInputs().map(n=>n.checked),[false,true]);await h.$('export').onclick();await h.drain();assert.deepEqual(Array.from(h.outgoing.find(m=>m.type==='complete').selectedRootIds),['c']);});
-test('page checks can be cleared and are not restored by a later catalog refresh',async()=>{const h=harness();await h.drain();h.choice.scope.value='pages';assert.deepEqual(h.pageInputs().map(n=>n.checked),[true,false]);h.$('clearPages').onclick();assert.deepEqual(h.pageInputs().map(n=>n.checked),[false,false]);assert.match(h.$('scopeInfo').textContent,/已选 0 \/ 2/);h.events.selectionchange();await h.drain();assert.deepEqual(h.pageInputs().map(n=>n.checked),[false,false]);h.$('checkPages').onclick();assert.deepEqual(h.pageInputs().map(n=>n.checked),[true,true]);assert.match(h.$('scopeInfo').textContent,/已选 2 \/ 2/);});
+test('switching Page refreshes selection and keeps manually chosen Page checkboxes',async()=>{const h=harness();await h.drain();h.choice.scope.value='pages';h.pageInputs()[0].checked=false;h.pageInputs()[1].checked=true;h.p2.selection=[h.c];h.native.figma.currentPage=h.p2;h.events.currentpagechange();await h.drain();assert.match(h.$('selection').textContent,/Design c/);assert.deepEqual(h.pageInputs().map(n=>n.checked),[false,true]);await h.$('export').onclick();await h.drain();assert.deepEqual(Array.from(h.outgoing.find(m=>m.type==='complete').selectedRootIds),['c']);});
+test('current selection and page checks are mutually exclusive',async()=>{const h=harness();await h.drain();assert.equal(h.choice.scope.value,'selection');assert.deepEqual(h.pageInputs().map(n=>n.checked),[false,false]);assert.equal(h.$('selectionRow').hidden,false);h.pageInputs()[0].checked=true;h.pageInputs()[0].onchange();h.pageInputs()[1].checked=true;h.pageInputs()[1].onchange();assert.equal(h.choice.scope.value,'pages');assert.deepEqual(h.pageInputs().map(n=>n.checked),[true,true]);assert.match(h.$('scopeInfo').textContent,/已选 2 \/ 2/);assert.equal(h.$('selectionRow').hidden,true);h.pageInputs()[1].checked=false;h.pageInputs()[1].onchange();assert.equal(h.choice.scope.value,'pages');assert.deepEqual(h.pageInputs().map(n=>n.checked),[true,false]);h.scopeRadios[0].onchange();assert.equal(h.choice.scope.value,'selection');assert.deepEqual(h.pageInputs().map(n=>n.checked),[false,false]);assert.equal(h.$('scopeInfo').textContent,'');h.events.selectionchange();await h.drain();assert.deepEqual(h.pageInputs().map(n=>n.checked),[false,false]);assert.equal(h.choice.scope.value,'selection');});
 test('stale nonempty UI selection is not used after the real selection is cleared',async()=>{const h=harness({initialSelection:true});await h.drain();h.p1.selection=[];await h.$('export').onclick();await h.drain();assert.match(h.$('status').textContent,/请先在 Figma 中选中/);assert.ok(!h.blob());assert.equal(h.$('export').disabled,false);});
 test('refresh selection button actively reads host state and rejects foreign channel packets',async()=>{const h=harness();await h.drain();h.p1.selection=[h.b];await h.$('refreshSelection').onclick();await h.drain();assert.match(h.$('selection').textContent,/Design b/);await h.ui.window.onmessage({source:null,data:{pluginMessage:{channel:'foreign',type:'catalog',pages:[],selection:[]}}});assert.match(h.$('selection').textContent,/Design b/);const before=h.outgoing.length;await h.native.figma.ui.onmessage({type:'get-state',channel:'foreign'});assert.equal(h.outgoing.length,before);});
 test('a disconnected bridge shows a connection error instead of falsely claiming there is no selection',async()=>{const h=harness({disconnect:true});const click=h.$('export').onclick();for(const fn of [...h.timers.values()])fn();await click;await h.drain();assert.match(h.$('status').textContent,/无法同步 Figma 选区/);assert.equal(h.$('export').disabled,false);assert.ok(!h.sent.some(m=>m.type==='export'));});
@@ -39,11 +41,21 @@ test('partial updates validate the actual selection against the old package befo
 
 test('populated Section reaches UI through the bridge and ZIP contains its self-contained composite preview',async()=>{const h=harness();await h.drain();h.p1.selection=[h.b];h.b.exportAsync=async()=>{throw Error('unsupported Section bounds')};const a=frame('inside-section',h.b);await h.$('export').onclick();await h.drain();assert.equal(h.$('download').hidden,false,h.$('status').textContent);const zip=await JSZip.loadAsync(await h.blob().arrayBuffer());const name=Object.keys(zip.files).find(n=>n.endsWith('data/previews.json')),prefix=name.slice(0,-'data/previews.json'.length),previews=JSON.parse(await zip.file(name).async('string'));assert.equal(previews[0].tiles[0].nodeId,a.id);const svg=await zip.file(prefix+previews[0].path).async('string');assert.match(svg,/data:image\/png;base64,/);assert.match(svg,/viewBox="0 0 160 240"/);});
 
-test('asset errors cross the bridge without aborting ZIP, identify frame and layer, and retain successful formats',async()=>{
+test('a layer Figma reports as having no visible content is skipped and does not fail the package',async()=>{
  const h=harness({initialSelection:true});await h.drain();const n=frame('398:20865',h.a,'RECTANGLE'),other=frame('next',h.a,'RECTANGLE');n.name='矩形';n.exportSettings=[{format:'SVG'},{format:'PNG'}];other.exportSettings=[{format:'PNG'}];const exporter=n.exportAsync;n.exportAsync=async setting=>{if(setting.format==='SVG')throw Error('Failed to export node. This node may not have any visible layers.');return exporter(setting)};
- await h.$('export').onclick();await h.drain();assert.equal(h.$('download').hidden,false,h.$('status').textContent);assert.match(h.$('status').textContent,/切图失败 1 项/);assert.doesNotMatch(h.$('status').textContent,/图层路径|Failed to export/);assert.equal(h.$('failureDetails').hidden,false);assert.equal(h.$('failureDetails').open,false);assert.match(h.$('failureList').textContent,/画板：Design a（a）/);assert.match(h.$('failureList').textContent,/矩形（398:20865）/);assert.match(h.$('failureList').textContent,/SVG/);assert.match(h.$('failureList').textContent,/可见性、透明度、裁剪和蒙版/);
+ await h.$('export').onclick();await h.drain();assert.equal(h.$('download').hidden,false,h.$('status').textContent);assert.doesNotMatch(h.$('status').textContent,/切图失败|图层路径|Failed to export/);assert.equal(h.$('failureDetails').hidden,true);
+ const done=h.outgoing.find(m=>m.type==='complete');assert.equal(done.assetFailures.length,0);assert.equal(done.assets.length,2);assert.ok(done.assets.every(a=>a.format==='png'));
  const zip=await JSZip.loadAsync(await h.blob().arrayBuffer()),name=Object.keys(zip.files).find(p=>p.endsWith('data/update-report.json')),prefix=name.slice(0,-'data/update-report.json'.length),report=JSON.parse(await zip.file(name).async('string'));
  assert.equal(Object.hasOwn(report,'assetFailures'),false);assert.equal(Object.hasOwn(report,'warnings'),false);assert.equal(Object.hasOwn(report,'status'),false);assert.equal(zip.file(prefix+'切图失败清单.txt'),null);for(const file of Object.values(zip.files))if(!file.dir&&/\.(json|js|txt|html)$/.test(file.name))assert.doesNotMatch(await file.async('string'),/may not have any visible layers/);const assets=JSON.parse(await zip.file(prefix+'data/assets.json').async('string'));assert.equal(assets.length,2);for(const asset of assets){assert.ok(zip.file(prefix+asset.path));assert.equal(asset.format,'png');}
+});
+test('hidden layers and boolean operands without their own paint are not exported',async()=>{
+ const h=harness({initialSelection:true});await h.drain();const hidden=frame('hidden-cutout',h.a,'VECTOR');hidden.visible=false;hidden.exportSettings=[{format:'SVG'}];hidden.exportAsync=async()=>{throw Error('hidden should not export')};
+ const bool=frame('union',h.a,'BOOLEAN_OPERATION');bool.fills=[{type:'SOLID',color:{r:0,g:0,b:0}}];bool.exportSettings=[{format:'SVG'}];bool.exportAsync=async()=>new TextEncoder().encode('<svg/>');
+ const operand=frame('recent',bool,'VECTOR');operand.exportSettings=[{format:'SVG'}];let operandCalls=0;operand.exportAsync=async()=>{operandCalls++;throw Error('Failed to export node. This node may not have any visible layers.')};
+ const painted=frame('painted-operand',bool,'VECTOR');painted.fills=[{type:'SOLID',color:{r:1,g:0,b:0}}];painted.exportSettings=[{format:'SVG'},{format:'PNG'}];const paintedPNG=painted.exportAsync;painted.exportAsync=async setting=>{if(setting.format==='SVG')throw Error('Failed to export node. This node may not have any visible layers.');return paintedPNG(setting)};
+ const wrapper=frame('follow-up',h.a,'FRAME');wrapper.exportSettings=[{format:'SVG'}];wrapper.exportAsync=async()=>{throw Error('Failed to export node. This node may not have any visible layers.')};const empty=frame('empty-shape',wrapper,'BOOLEAN_OPERATION');empty.exportSettings=[{format:'SVG'}];empty.exportAsync=async()=>{throw Error('Failed to export node. This node may not have any visible layers.')};
+ await h.$('export').onclick();await h.drain();const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);assert.equal(operandCalls,0);assert.equal(done.assetFailures.length,0);assert.doesNotMatch(h.$('status').textContent,/切图失败/);
+ assert.equal(done.assets.map(a=>a.nodeIds[0]+':'+a.format).sort().join(),'painted-operand:png,union:svg');
 });
 test('failed configured parent does not suppress explicitly configured descendant assets',async()=>{
  const h=harness({initialSelection:true});await h.drain();const parent=frame('parent-cutout',h.a);parent.exportSettings=[{format:'SVG'}];parent.exportAsync=async()=>{throw Error('parent export failed')};const child=frame('child-cutout',parent,'VECTOR');child.width=20;child.height=20;child.absoluteBoundingBox.width=20;child.absoluteBoundingBox.height=20;child.exportSettings=[{format:'SVG'},{format:'PNG'}];const childPNG=child.exportAsync;child.exportAsync=async setting=>setting.format==='SVG'?new TextEncoder().encode('<svg/>'):childPNG(setting);
@@ -209,6 +221,41 @@ test('unavailable variable metadata does not abort an otherwise valid export',as
  await h.$('export').onclick();await h.drain();const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);assert.equal(done.design.nodes[0].colorBindings,undefined);assert.equal(done.design.nodes[0].fills[0].boundVariables.color.id,'missing');assert.equal(h.$('download').hidden,false);
 });
 
+
+test('layer annotations keep label, category and properties, and skip empty notes',async()=>{
+ const h=harness({initialSelection:true});await h.drain();
+ const noted=frame('noted',h.a,'RECTANGLE');
+ noted.annotations=[
+  {label:'说明annotation',labelMarkdown:'**说明annotation**',categoryId:'cat',properties:[{type:'width'},{type:'fills'},{type:'width'},{type:1},{type:''}]},
+  {label:'   ',properties:[]},
+  {labelMarkdown:'only markdown'},
+  {categoryId:'missing',properties:[{type:'opacity'}]},
+ ];
+ const source=JSON.stringify(noted.annotations);
+ let lookups=0;
+ h.native.figma.annotations={getAnnotationCategoryByIdAsync:async id=>{lookups++;if(id==='cat')return{id,label:'交互',color:'blue',isPreset:false,remove(){},setLabel(){}};if(id==='missing')return null;throw Error('unknown');}};
+ const broken=frame('broken-notes',h.a,'ELLIPSE');Object.defineProperty(broken,'annotations',{get(){throw Error('annotations unavailable')}});
+ await h.$('export').onclick();await h.drain();
+ const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);
+ const note=done.design.nodes.find(n=>n.id==='noted');
+ assert.equal(JSON.stringify(note.annotations),JSON.stringify([
+  {label:'说明annotation',categoryId:'cat',properties:['width','fills'],category:{id:'cat',label:'交互',color:'blue'}},
+  {label:'only markdown'},
+  {categoryId:'missing',properties:['opacity']},
+ ]));
+ assert.equal(done.design.nodes.find(n=>n.id==='a').annotations,undefined);
+ assert.equal(done.design.nodes.find(n=>n.id==='broken-notes').annotations,undefined);
+ assert.equal(lookups,2);assert.equal(JSON.stringify(noted.annotations),source);assert.equal(h.$('download').hidden,false);
+});
+
+test('a failed annotation category lookup still exports the note',async()=>{
+ const h=harness({initialSelection:true});await h.drain();
+ h.a.annotations=[{label:'说明annotation',categoryId:'cat'}];
+ h.native.figma.annotations={getAnnotationCategoryByIdAsync:async()=>{throw Error('category unavailable')}};
+ await h.$('export').onclick();await h.drain();
+ const done=h.outgoing.find(m=>m.type==='complete');assert.ok(done,h.$('status').textContent);
+ assert.equal(JSON.stringify(done.design.nodes[0].annotations),JSON.stringify([{label:'说明annotation',categoryId:'cat'}]));
+});
 
 test('a subsequent successful export clears previous failure details without hiding arbitrary errors',async()=>{
  const h=harness({initialSelection:true});await h.drain();const n=frame('broken',h.a,'VECTOR');n.exportSettings=[{format:'SVG'}];n.exportAsync=async()=>{throw Error('specific SVG export error')};

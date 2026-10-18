@@ -56,8 +56,6 @@ function lock(value) {
   $('export').disabled = value;
   $('cancel').hidden = !value;
   $('refreshSelection').disabled = value;
-  $('checkPages').disabled = value;
-  $('clearPages').disabled = value;
 }
 function hideDownload() {
   if (downloadUrl) URL.revokeObjectURL(downloadUrl);
@@ -86,15 +84,21 @@ function scopeInfo() {
 function pageChecks() {
   return [...$('pages').children].map((label) => label.children[0]).filter(Boolean);
 }
-function setAllPages(checked) {
-  for (const input of pageChecks()) input.checked = checked;
+function chooseScope(next) {
+  for (const el of document.querySelectorAll('input[name=scope]')) el.checked = el.value === next;
+  if (next === 'selection') {
+    for (const input of pageChecks()) input.checked = false;
+  }
   scopeInfo();
 }
-$('checkPages').onclick = () => setAllPages(true);
-$('clearPages').onclick = () => setAllPages(false);
+function onPageCheck(input) {
+  if (input.checked) chooseScope('pages');
+  else scopeInfo();
+}
 function modes() {
   const update = mode() === 'update';
   $('oldPanel').hidden = !update;
+  $('selectionScope').hidden = update;
   $('scopeControls').hidden = update;
   $('export').textContent = update ? '更新选中画板并生成 ZIP' : '生成离线交付 ZIP';
   scopeInfo();
@@ -102,7 +106,9 @@ function modes() {
   hideDownload();
 }
 document.querySelectorAll('input[name=mode]').forEach((el) => (el.onchange = modes));
-document.querySelectorAll('input[name=scope]').forEach((el) => (el.onchange = scopeInfo));
+document.querySelectorAll('input[name=scope]').forEach((el) => {
+  el.onchange = () => chooseScope(el.value);
+});
 async function readBaseline(file) {
   if (file.size > 300 * 1024 * 1024) throw Error('旧包超过 300MB，请拆分交付范围后再导入。');
   const zip = await JSZip.loadAsync(file),
@@ -530,6 +536,7 @@ window.onmessage = async (event) => {
       m.pages.forEach((p, i) => {
         inputs[i].disabled = working;
         if (inputs[i].nextSibling) inputs[i].nextSibling.textContent = p.name;
+        if (scope() === 'selection') inputs[i].checked = false;
       });
     } else {
       $('pages').replaceChildren();
@@ -538,9 +545,11 @@ window.onmessage = async (event) => {
           input = document.createElement('input');
         input.type = 'checkbox';
         input.value = p.id;
-        input.checked = first ? p.id === m.currentPage : known.has(p.id) && checked.has(p.id);
+        input.checked =
+          scope() === 'pages' &&
+          (first ? p.id === m.currentPage : known.has(p.id) && checked.has(p.id));
         input.disabled = working;
-        input.onchange = scopeInfo;
+        input.onchange = () => onPageCheck(input);
         label.append(input, document.createTextNode(p.name));
         $('pages').append(label);
       }

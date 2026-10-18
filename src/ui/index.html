@@ -21,21 +21,17 @@
     </section>
     <section>
       <strong>导出范围</strong>
-      <div id="scopeControls">
-        <label><input type="radio" name="scope" value="pages" checked />选择 Pages</label>
-        <div class="page-tools">
-          <button id="checkPages" class="mini" type="button">全选</button>
-          <button id="clearPages" class="mini" type="button">取消勾选</button>
-        </div>
-        <div id="pages">正在读取页面…</div>
-        <label
-          ><input type="radio" name="scope" value="selection" />Figma 当前选中的 Frame /
-          Section</label
-        >
-      </div>
-      <div class="row" id="selectionRow">
+      <label id="selectionScope"
+        ><input type="radio" name="scope" value="selection" />Figma 当前选中的 Frame /
+        Section</label
+      >
+      <div class="row" id="selectionRow" hidden>
         <div id="selection">正在读取选区…</div>
         <button id="refreshSelection" class="secondary" type="button">刷新选区</button>
+      </div>
+      <div id="scopeControls">
+        <label><input type="radio" name="scope" value="pages" checked />选择 Pages</label>
+        <div id="pages">正在读取页面…</div>
       </div>
       <div id="connection" class="hint">正在连接 Figma…</div>
       <div id="scopeInfo"></div>

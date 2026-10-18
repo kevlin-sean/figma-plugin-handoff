@@ -154,11 +154,11 @@ function renderNav() {
   ).join("");
   const rows = treeRows.map(({ node: n, level }) => {
     const children = layerChildren.get(n.id) || [], open = expandedLayers.has(n.id);
-    return `<div id="layer-${layerIndexes.get(n.id)}" class="layer-row ${selected === n.id ? "active" : path.has(n.id) ? "ancestor" : ""} ${n.visible === false ? "is-hidden" : ""}" role="treeitem" aria-level="${level}" aria-selected="${selected === n.id}" ${children.length ? `aria-expanded="${open}"` : ""} tabindex="${treeFocusId === n.id ? "0" : "-1"}" data-layer="${esc(n.id)}" style="--level:${Math.min(level - 1, 12)}" title="${esc(n.name + " \xB7 " + n.type + " \xB7 " + n.id)}">${children.length ? `<button class="layer-disclosure" tabindex="-1" data-toggle-layer="${esc(n.id)}" aria-label="${open ? "\u6536\u8D77" : "\u5C55\u5F00"} ${esc(n.name)}">${open ? "\u25BE" : "\u25B8"}</button>` : '<span class="layer-spacer"></span>'}<span class="layer-icon" aria-hidden="true">${layerGlyph(n)}</span><span class="layer-name">${esc(n.name)}</span><span class="layer-state">${n.locked === true ? '<span title="\u5DF2\u9501\u5B9A\uFF08\u53EA\u8BFB\uFF09" aria-label="\u5DF2\u9501\u5B9A"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg></span>' : ""}${n.visible === false ? '<span title="\u56FE\u5C42\u6216\u5176\u7236\u7EA7\u5DF2\u9690\u85CF" aria-label="\u5DF2\u9690\u85CF"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2-4 7-4 7 4 7 4-2 4-7 4-7-4-7-4ZM2 2l12 12"/></svg></span>' : ""}</span></div>`;
+    return `<div id="layer-${layerIndexes.get(n.id)}" class="layer-row ${selected === n.id ? "active" : path.has(n.id) ? "ancestor" : ""} ${n.visible === false ? "is-hidden" : ""}" role="treeitem" aria-level="${level}" aria-selected="${selected === n.id}" ${children.length ? `aria-expanded="${open}"` : ""} tabindex="${treeFocusId === n.id ? "0" : "-1"}" data-layer="${esc(n.id)}" style="--level:${Math.min(level - 1, 12)}" title="${esc(n.name + " \xB7 " + n.type + " \xB7 " + n.id)}">${children.length ? `<button class="layer-disclosure" tabindex="-1" data-toggle-layer="${esc(n.id)}" aria-label="${open ? "\u6536\u8D77" : "\u5C55\u5F00"} ${esc(n.name)}">${open ? "\u25BE" : "\u25B8"}</button>` : '<span class="layer-spacer"></span>'}<span class="layer-icon" aria-hidden="true">${layerGlyph(n)}</span><span class="layer-name">${esc(n.name)}</span><span class="layer-state">${noteBadge(n)}${n.locked === true ? '<span title="\u5DF2\u9501\u5B9A\uFF08\u53EA\u8BFB\uFF09" aria-label="\u5DF2\u9501\u5B9A"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg></span>' : ""}${n.visible === false ? '<span title="\u56FE\u5C42\u6216\u5176\u7236\u7EA7\u5DF2\u9690\u85CF" aria-label="\u5DF2\u9690\u85CF"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2-4 7-4 7 4 7 4-2 4-7 4-7-4-7-4ZM2 2l12 12"/></svg></span>' : ""}</span></div>`;
   }).join("");
   const boards = pageBoards(), selectedFrame = getFrame(byId.get(selected));
   const cards = boards.map(
-    (n) => `<button class="board-card ${selectedFrame.id === n.id ? "active" : ""}" data-focus="${esc(n.id)}" ${selectedFrame.id === n.id ? 'aria-current="true"' : ""}>${boardThumbnail(n)}<span class="board-info"><strong>${esc(n.name)}</strong><small>${esc(currentPage.name)} \xB7 ${num(n.width)} \xD7 ${num(n.height)}</small></span></button>`
+    (n) => `<button id="board-${layerIndexes.get(n.id)}" class="board-card ${selectedFrame.id === n.id ? "active" : ""}" data-focus="${esc(n.id)}" ${selectedFrame.id === n.id ? 'aria-current="true"' : ""}>${boardThumbnail(n)}<span class="board-info"><strong>${esc(n.name)}</strong><small>${esc(currentPage.name)} \xB7 ${num(n.width)} \xD7 ${num(n.height)}</small></span></button>`
   ).join("");
   $("navigation").innerHTML = '<div class="page-list">' + pages + `</div><div class="directory-switch"><button data-directory="boards" class="${directory === "boards" ? "active" : ""}" aria-pressed="${directory === "boards"}">\u753B\u677F <small>${boards.length}</small></button><button data-directory="layers" class="${directory === "layers" ? "active" : ""}" aria-pressed="${directory === "layers"}">\u56FE\u5C42\u76EE\u5F55</button></div><div class="board-list" ${directory === "boards" ? "" : "hidden"}>${cards}</div><div class="layer-tree" role="tree" aria-label="\u5F53\u524D\u9875\u9762\u56FE\u5C42" ${directory === "layers" ? "" : "hidden"}>${rows}</div>`;
   $("pageCount").textContent = `${D.pages.length} \u9875\u9762 \xB7 ${currentPage.regions.reduce((sum, id) => sum + (layerCounts.get(id) || 0), 0)} \u56FE\u5C42`;
@@ -172,6 +172,13 @@ function scrollLayer(id, focus = false) {
   if (!row) return;
   if (focus) row.focus?.({ preventScroll: true });
   row.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+}
+function pinNav(id) {
+  const key = layerIndexes.get(id);
+  const board = document.getElementById("board-" + key);
+  const row = document.getElementById("layer-" + key);
+  const target = directory === "layers" ? row || board : board || row;
+  target?.scrollIntoView?.({ block: "start", inline: "nearest" });
 }
 function toggleLayer(id) {
   if (!(layerChildren.get(id) || []).length) return;
@@ -187,10 +194,36 @@ function inspectLayer(id) {
   panel();
   scrollLayer(id, true);
 }
+const pageTypes = /* @__PURE__ */ new Set(["FRAME", "SECTION", "COMPONENT", "INSTANCE", "COMPONENT_SET"]);
+function pageTitles(region) {
+  const list = [], seen = /* @__PURE__ */ new Set();
+  const add = (n) => {
+    if (!n || seen.has(n.id) || !pageTypes.has(n.type)) return;
+    if (n.id !== region.id && n.regionId !== region.id) return;
+    seen.add(n.id);
+    list.push(n);
+  };
+  if (region.type === "SECTION" || frames.some((f) => f.id === region.id)) add(region);
+  for (const f of frames) if (f.regionId === region.id) add(f);
+  const current = getFrame(byId.get(selected));
+  return list.map((n) => {
+    const b = box(n, region), on = current?.id === n.id;
+    return `<span class="board-label-anchor" style="left:${b.x}px;top:${b.y}px"><button type="button" class="board-label${on ? " active" : ""}" data-board="${esc(n.id)}" aria-label="${esc("\u9009\u4E2D " + n.name)}" title="${esc(n.name)}" ${on ? 'aria-current="true"' : ""}>${esc(n.name)}</button></span>`;
+  }).join("");
+}
+function syncBoardLabels() {
+  const current = getFrame(byId.get(selected));
+  document.querySelectorAll("[data-board]").forEach((el) => {
+    const on = el.dataset.board === current?.id;
+    el.classList.toggle("active", on);
+    if (on) el.setAttribute("aria-current", "true");
+    else el.removeAttribute("aria-current");
+  });
+}
 function renderScene() {
   $("scene").innerHTML = regions.map((r) => {
     const b = box(r), p = D.previews.find((p2) => p2.id === r.id);
-    return `<div class="region" id="region-${r.id.replace(":", "-")}" data-region="${esc(r.id)}" style="left:${b.x - bounds.x + pad}px;top:${b.y - bounds.y + pad}px;width:${b.w}px;height:${b.h}px"><span class="region-label">${esc(r.name)} \xB7 ${num(b.x)}, ${num(b.y)}</span><div style="position:absolute;inset:0;overflow:hidden;pointer-events:none"><img style="position:absolute;left:${p.offsetX ?? -(p.inset || 0)}px;top:${p.offsetY ?? -(p.inset || 0)}px;width:${p.displayWidth ?? p.pixelWidth / p.scale}px;height:${p.displayHeight ?? p.pixelHeight / p.scale}px" src="${esc(p.path)}" alt="${esc(r.name + "\u539F\u59CB\u8BBE\u8BA1\u7A3F")}" draggable="false"></div>${(p.patches || []).map((q) => `<div style="position:absolute;left:${q.x}px;top:${q.y}px;width:${q.width}px;height:${q.height}px;background:${q.background};pointer-events:none"><img src="${esc(q.path)}" alt="" draggable="false" style="display:block;width:100%;height:100%"></div>`).join("")}<svg data-overlay="${esc(r.id)}" aria-hidden="true"></svg></div>`;
+    return `<div class="region" id="region-${r.id.replace(":", "-")}" data-region="${esc(r.id)}" style="left:${b.x - bounds.x + pad}px;top:${b.y - bounds.y + pad}px;width:${b.w}px;height:${b.h}px">${pageTitles(r)}<div style="position:absolute;inset:0;overflow:hidden;pointer-events:none"><img style="position:absolute;left:${p.offsetX ?? -(p.inset || 0)}px;top:${p.offsetY ?? -(p.inset || 0)}px;width:${p.displayWidth ?? p.pixelWidth / p.scale}px;height:${p.displayHeight ?? p.pixelHeight / p.scale}px" src="${esc(p.path)}" alt="${esc(r.name + "\u539F\u59CB\u8BBE\u8BA1\u7A3F")}" draggable="false"></div>${(p.patches || []).map((q) => `<div style="position:absolute;left:${q.x}px;top:${q.y}px;width:${q.width}px;height:${q.height}px;background:${q.background};pointer-events:none"><img src="${esc(q.path)}" alt="" draggable="false" style="display:block;width:100%;height:100%"></div>`).join("")}<svg data-overlay="${esc(r.id)}" aria-hidden="true"></svg></div>`;
   }).join("");
   resizeStage();
 }
@@ -199,6 +232,7 @@ function resizeStage() {
   $("scene").style.width = w + "px";
   $("scene").style.height = h + "px";
   $("scene").style.transform = `scale(${zoom})`;
+  $("scene").style.setProperty?.("--z", String(zoom));
   $("stage").style.width = Math.max(w * zoom, $("viewport").clientWidth) + "px";
   $("stage").style.height = Math.max(h * zoom, $("viewport").clientHeight) + "px";
   $("zoomValue").textContent = Math.round(zoom * 100) + "%";
@@ -233,7 +267,7 @@ function focusNode(id) {
   v.scrollTop = Math.max(0, (b.y - bounds.y + pad) * zoom - 45);
   $("crumb").textContent = byId.get(n.regionId).name + " / " + n.name;
   renderNav();
-  scrollLayer(id);
+  pinNav(id);
   renderInspector();
   $("inspectPanel").scrollTop = 0;
   renderAssets();
@@ -607,8 +641,21 @@ function updateNativeDownload(point) {
   nativeDownloadLink.setAttribute("aria-label", "\u4E0B\u8F7D " + assetFilename(a, context.owner));
   if (nativeDownloadLink.parentElement !== point.region) point.region.append(nativeDownloadLink);
 }
+function focusBoard(id) {
+  const n = byId.get(id);
+  if (!n) return;
+  directory = frames.some((f) => f.id === id) ? "boards" : "layers";
+  if (library !== "pages") setLibrary("pages");
+  else if ($("sidebar").hidden) togglePanel("left");
+  focusNode(id);
+}
 function handleCanvasClick(e) {
   if (suppressClick || space || panMode) return;
+  const board = e.target.closest?.("[data-board]");
+  if (board) {
+    focusBoard(board.dataset.board);
+    return;
+  }
   hitIds = pointerHits(e);
   if (!hitIds.length) return;
   const id = canvasExportSelection(hitIds);
@@ -896,6 +943,64 @@ function templateCode(n, type) {
     lines.push("// \u63CF\u8FB9\u3001\u591A\u91CD\u586B\u5145\u548C\u9634\u5F71\u6309\u8BBE\u8BA1\u6570\u636E\u8865\u5145\u3002");
   return lines.join("\n");
 }
+const notePropertyLabels = {
+  width: "\u5BBD\u5EA6",
+  height: "\u9AD8\u5EA6",
+  maxWidth: "\u6700\u5927\u5BBD\u5EA6",
+  minWidth: "\u6700\u5C0F\u5BBD\u5EA6",
+  maxHeight: "\u6700\u5927\u9AD8\u5EA6",
+  minHeight: "\u6700\u5C0F\u9AD8\u5EA6",
+  fills: "\u586B\u5145",
+  strokes: "\u63CF\u8FB9",
+  effects: "\u6548\u679C",
+  strokeWeight: "\u63CF\u8FB9\u7C97\u7EC6",
+  cornerRadius: "\u5706\u89D2",
+  textStyleId: "\u6587\u672C\u6837\u5F0F",
+  textAlignHorizontal: "\u6C34\u5E73\u5BF9\u9F50",
+  fontFamily: "\u5B57\u4F53",
+  fontStyle: "\u5B57\u4F53\u6837\u5F0F",
+  fontSize: "\u5B57\u53F7",
+  fontWeight: "\u5B57\u91CD",
+  lineHeight: "\u884C\u9AD8",
+  letterSpacing: "\u5B57\u8DDD",
+  itemSpacing: "\u95F4\u8DDD",
+  padding: "\u5185\u8FB9\u8DDD",
+  layoutMode: "\u81EA\u52A8\u5E03\u5C40",
+  alignItems: "\u5BF9\u9F50",
+  opacity: "\u4E0D\u900F\u660E\u5EA6",
+  mainComponent: "\u4E3B\u7EC4\u4EF6",
+  gridRowGap: "\u884C\u95F4\u8DDD",
+  gridColumnGap: "\u5217\u95F4\u8DDD",
+  gridRowCount: "\u884C\u6570",
+  gridColumnCount: "\u5217\u6570",
+  gridRowAnchorIndex: "\u884C\u951A\u70B9",
+  gridColumnAnchorIndex: "\u5217\u951A\u70B9",
+  gridRowSpan: "\u884C\u8DE8\u5EA6",
+  gridColumnSpan: "\u5217\u8DE8\u5EA6"
+};
+const noteColors = /* @__PURE__ */ new Set(["yellow", "orange", "red", "pink", "violet", "blue", "teal", "green"]);
+function layerNotes(n) {
+  return Array.isArray(n?.annotations) ? n.annotations.filter((note) => note && typeof note === "object") : [];
+}
+function noteBadge(n) {
+  const list = layerNotes(n);
+  if (!list.length) return "";
+  const text = list.map((note) => note.label).filter((label) => typeof label === "string" && label).join("\n");
+  return `<span class="layer-note-mark" title="${esc(text ? "\u6CE8\u91CA\uFF1A" + text : "\u6709\u6CE8\u91CA")}" aria-label="\u6709\u6CE8\u91CA"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v6.5H8.2L5.5 13V10H3z"/></svg></span>`;
+}
+function notesPanel(n) {
+  const list = layerNotes(n);
+  if (!list.length) return "";
+  const body = list.map((note) => {
+    const named = note.category && typeof note.category.label === "string" ? note.category.label.trim() : "";
+    const category = named || (note.categoryId ? "\u672A\u77E5\u5206\u7C7B" : "\u65E0\u5206\u7C7B");
+    const color = note.category && noteColors.has(note.category.color) ? note.category.color : "";
+    const text = typeof note.label === "string" ? note.label : "";
+    const props = Array.isArray(note.properties) ? note.properties.filter((type) => typeof type === "string" && type) : [];
+    return '<article class="layer-note"><p class="layer-note-category">' + (color ? `<i data-color="${esc(color)}"></i>` : "") + esc(category) + "</p>" + (text ? `<p class="layer-note-body">${esc(text)}</p>` : "") + (props.length ? `<ul class="layer-note-props">${props.map((type) => `<li>${esc(notePropertyLabels[type] || type)}</li>`).join("")}</ul>` : "") + "</article>";
+  }).join("");
+  return refSection("\u6CE8\u91CA", body, "note-section");
+}
 function cssPanel(n) {
   if (!Object.values(cssData(n).groups).some((entries) => entries.length)) return "";
   const type = ["css", "android", "ios"].includes(codeTemplate) ? codeTemplate : "css", code = templateCode(n, type), tabs = ["css", "android", "ios"].map(
@@ -913,7 +1018,7 @@ function renderInspector() {
       "\u5706\u89D2",
       radii.every((v) => v === radii[0]) ? unitValue(radii[0]) : radii.map((v) => unitValue(v)).join(" ")
     );
-  $("inspectPanel").innerHTML = `<h2 class="mx-node-name">${esc(n.name)}</h2>` + refSection("\u5C5E\u6027", properties) + fillsPanel(n) + bordersPanel(n) + fontsPanel(n) + shadowsPanel(n) + cssPanel(n);
+  $("inspectPanel").innerHTML = `<h2 class="mx-node-name">${esc(n.name)}</h2>` + notesPanel(n) + refSection("\u5C5E\u6027", properties) + fillsPanel(n) + bordersPanel(n) + fontsPanel(n) + shadowsPanel(n) + cssPanel(n);
   const dock = $("exportDock");
   if (dock) {
     dock.innerHTML = exportPanel(n);
@@ -969,6 +1074,7 @@ function drawOverlay() {
     }
     svg.innerHTML = s;
   });
+  syncBoardLabels();
 }
 function contains(n, x, y) {
   const t = n.absoluteTransform;

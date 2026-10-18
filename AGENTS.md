@@ -39,7 +39,7 @@ Figma 导入的是构建结果 `dist/manifest.json`，不是源码。`dist/` 不
 
 切图身份（`iconMemo`、`graphicMemo`、`fragmentMemo`）要在第一次 `exportAsync` 之前单线程算完，再并行导出。预览失败调用 `haltExport`，之后的 `check()` 让其余任务停下来；`settleAll` 等已发出的任务结束，再抛出第一个错误。取消仍只看 `cancelled`。
 
-面板在页面 id 列表不变时不要重建 `#pages` 里的勾选框，否则选区刷新会丢掉正在取消的那一次点击。名称可以原地更新。「全选」「取消勾选」只改这些框，并刷新「已选 N / M 个 Page」。局部更新隐藏整块范围控件。
+面板在页面 id 列表不变时不要重建 `#pages` 里的勾选框，否则选区刷新会丢掉正在取消的那一次点击。名称可以原地更新。当前选区与 Pages 互斥：选中当前选区会取消全部 Page 勾选；勾选 Page 会切回 Pages，Pages 可多选，并刷新「已选 N / M 个 Page」。局部更新隐藏选区单选和 Pages 范围，仍显示当前选区。
 
 `clean()` 把 symbol 写成 `MIXED`，非有限数字写成 `null`，`-0` 写成 `0`。对象仍走 JSON，避免把宿主 getter 和函数写进包。
 
