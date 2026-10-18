@@ -986,7 +986,7 @@ function noteBadge(n) {
   const list = layerNotes(n);
   if (!list.length) return "";
   const text = list.map((note) => note.label).filter((label) => typeof label === "string" && label).join("\n");
-  return `<span class="layer-note-mark" title="${esc(text ? "\u6CE8\u91CA\uFF1A" + text : "\u6709\u6CE8\u91CA")}" aria-label="\u6709\u6CE8\u91CA"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v6.5H8.2L5.5 13V10H3z"/></svg></span>`;
+  return `<span class="layer-note-mark" title="${esc(text ? "\u8BBE\u8BA1\u5907\u6CE8\uFF1A" + text : "\u6709\u8BBE\u8BA1\u5907\u6CE8")}" aria-label="\u6709\u8BBE\u8BA1\u5907\u6CE8"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v6.5H8.2L5.5 13V10H3z"/></svg></span>`;
 }
 function notesPanel(n) {
   const list = layerNotes(n);
@@ -999,7 +999,7 @@ function notesPanel(n) {
     const props = Array.isArray(note.properties) ? note.properties.filter((type) => typeof type === "string" && type) : [];
     return '<article class="layer-note"><p class="layer-note-category">' + (color ? `<i data-color="${esc(color)}"></i>` : "") + esc(category) + "</p>" + (text ? `<p class="layer-note-body">${esc(text)}</p>` : "") + (props.length ? `<ul class="layer-note-props">${props.map((type) => `<li>${esc(notePropertyLabels[type] || type)}</li>`).join("")}</ul>` : "") + "</article>";
   }).join("");
-  return refSection("\u6CE8\u91CA", body, "note-section");
+  return refSection("\u8BBE\u8BA1\u5907\u6CE8", body, "note-section");
 }
 function cssPanel(n) {
   if (!Object.values(cssData(n).groups).some((entries) => entries.length)) return "";

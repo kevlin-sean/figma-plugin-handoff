@@ -1286,7 +1286,7 @@ function noteBadge(n) {
     .map((note) => note.label)
     .filter((label) => typeof label === 'string' && label)
     .join('\n');
-  return `<span class="layer-note-mark" title="${esc(text ? '注释：' + text : '有注释')}" aria-label="有注释"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v6.5H8.2L5.5 13V10H3z"/></svg></span>`;
+  return `<span class="layer-note-mark" title="${esc(text ? '设计备注：' + text : '有设计备注')}" aria-label="有设计备注"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v6.5H8.2L5.5 13V10H3z"/></svg></span>`;
 }
 function notesPanel(n) {
   const list = layerNotes(n);
@@ -1314,7 +1314,7 @@ function notesPanel(n) {
       );
     })
     .join('');
-  return refSection('注释', body, 'note-section');
+  return refSection('设计备注', body, 'note-section');
 }
 function cssPanel(n) {
   if (!Object.values(cssData(n).groups).some((entries) => entries.length)) return '';
